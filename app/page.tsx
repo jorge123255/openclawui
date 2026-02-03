@@ -111,6 +111,27 @@ export default function Home() {
         />
       </div>
 
+      {/* Reset Config Banner */}
+      <div className="mb-8 p-4 rounded-xl bg-secondary/50 border border-border flex items-center justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            Want to start fresh?
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            if (confirm("This will reset all settings and restart the setup wizard. Continue?")) {
+              localStorage.removeItem("setupComplete");
+              localStorage.removeItem("config");
+              window.location.reload();
+            }
+          }}
+          className="text-sm px-4 py-2 rounded-lg bg-secondary hover:bg-secondary-hover transition-colors"
+        >
+          Restart Setup
+        </button>
+      </div>
+
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Activity Feed */}
@@ -209,6 +230,19 @@ function WelcomeScreen() {
         <p className="mt-6 text-sm text-muted-foreground">
           Already have a config?{" "}
           <button className="text-primary hover:underline">Import</button>
+        </p>
+
+        <p className="mt-2 text-sm text-muted-foreground">
+          <button 
+            onClick={() => {
+              localStorage.removeItem("setupComplete");
+              localStorage.removeItem("config");
+              window.location.reload();
+            }}
+            className="text-muted-foreground hover:text-foreground underline"
+          >
+            Reset everything
+          </button>
         </p>
       </motion.div>
     </main>
