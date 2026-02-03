@@ -174,170 +174,208 @@ function StepWrapper({
   );
 }
 
+type OS = "macos" | "windows" | "linux" | "unknown";
+
+function detectOS(): OS {
+  if (typeof window === "undefined") return "unknown";
+  const ua = navigator.userAgent.toLowerCase();
+  const platform = navigator.platform?.toLowerCase() || "";
+  
+  if (platform.includes("mac") || ua.includes("mac")) return "macos";
+  if (platform.includes("win") || ua.includes("win")) return "windows";
+  if (platform.includes("linux") || ua.includes("linux")) return "linux";
+  return "unknown";
+}
+
 function StepInstalling({
-  deployment,
   onComplete,
 }: {
   deployment: string;
   onComplete: () => void;
 }) {
-  const [status, setStatus] = useState<"checking" | "installing" | "done" | "error">("checking");
-  const [steps, setSteps] = useState([
-    { id: "node", label: "Node.js & npm", status: "pending" as "pending" | "running" | "done" | "error", message: "" },
-    { id: "openclaw", label: "OpenClaw", status: "pending" as "pending" | "running" | "done" | "error", message: "" },
-  ]);
-  const [error, setError] = useState<string | null>(null);
+  const [os, setOs] = useState<OS>("unknown");
+  const [checking, setChecking] = useState(false);
+  const [nodeStatus, setNodeStatus] = useState<"unknown" | "found" | "missing">("unknown");
+  const [nodeVersion, setNodeVersion] = useState("");
+  const [openclawStatus, setOpenclawStatus] = useState<"unknown" | "found" | "missing">("unknown");
+  const [openclawVersion, setOpenclawVersion] = useState("");
 
   useEffect(() => {
-    if (deployment === "local") {
-      runInstallation();
-    } else {
-      // Remote server - skip installation
-      onComplete();
-    }
-  }, [deployment]);
+    setOs(detectOS());
+  }, []);
 
-  async function runInstallation() {
-    setStatus("checking");
-
-    // Step 1: Check Node.js
-    updateStep("node", "running", "Checking Node.js...");
+  async function checkInstallation() {
+    setChecking(true);
+    
     try {
-      const res = await fetch("/api/install", {
+      // Check Node.js
+      const nodeRes = await fetch("/api/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "check-node" }),
       });
-      const data = await res.json();
+      const nodeData = await nodeRes.json();
       
-      if (data.installed) {
-        updateStep("node", "done", `Found Node ${data.node}, npm ${data.npm}`);
+      if (nodeData.installed) {
+        setNodeStatus("found");
+        setNodeVersion(`v${nodeData.node}`);
       } else {
-        updateStep("node", "error", "Node.js not installed");
-        setError("Please install Node.js from https://nodejs.org first, then restart setup.");
-        setStatus("error");
-        return;
+        setNodeStatus("missing");
       }
-    } catch (e) {
-      updateStep("node", "error", "Could not check Node.js");
-      setError("Failed to check system requirements");
-      setStatus("error");
-      return;
-    }
-
-    // Step 2: Install OpenClaw
-    setStatus("installing");
-    updateStep("openclaw", "running", "Installing OpenClaw...");
-    try {
-      const res = await fetch("/api/install", {
+      
+      // Check OpenClaw
+      const ocRes = await fetch("/api/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "install-openclaw" }),
+        body: JSON.stringify({ action: "check-openclaw" }),
       });
-      const data = await res.json();
+      const ocData = await ocRes.json();
       
-      if (data.success) {
-        if (data.alreadyInstalled) {
-          updateStep("openclaw", "done", `Already installed (${data.version})`);
-        } else {
-          updateStep("openclaw", "done", "Installed successfully!");
-        }
+      if (ocData.installed) {
+        setOpenclawStatus("found");
+        setOpenclawVersion(ocData.version || "installed");
       } else {
-        updateStep("openclaw", "error", data.error || "Installation failed");
-        setError(data.error || "Failed to install OpenClaw");
-        setStatus("error");
-        return;
+        setOpenclawStatus("missing");
       }
     } catch (e) {
-      updateStep("openclaw", "error", "Installation failed");
-      setError("Failed to install OpenClaw");
-      setStatus("error");
-      return;
+      console.error("Check failed:", e);
     }
-
-    setStatus("done");
+    
+    setChecking(false);
   }
 
-  function updateStep(id: string, status: "pending" | "running" | "done" | "error", message: string) {
-    setSteps((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status, message } : s))
-    );
-  }
+  const installCommands: Record<OS, { node: string; openclaw: string }> = {
+    macos: {
+      node: "brew install node",
+      openclaw: "npm install -g openclaw",
+    },
+    windows: {
+      node: "winget install OpenJS.NodeJS",
+      openclaw: "npm install -g openclaw",
+    },
+    linux: {
+      node: "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs",
+      openclaw: "npm install -g openclaw",
+    },
+    unknown: {
+      node: "# Install Node.js from https://nodejs.org",
+      openclaw: "npm install -g openclaw",
+    },
+  };
+
+  const osLabels: Record<OS, string> = {
+    macos: "macOS",
+    windows: "Windows", 
+    linux: "Linux",
+    unknown: "Your System",
+  };
+
+  const allReady = nodeStatus === "found" && openclawStatus === "found";
 
   return (
     <StepWrapper
-      title={status === "done" ? "All Set! ✓" : "Setting Up..."}
-      description={
-        status === "done"
-          ? "OpenClaw is installed and ready"
-          : "Installing required components"
-      }
+      title="Install OpenClaw"
+      description={`Detected: ${osLabels[os]}`}
     >
       <div className="space-y-4">
-        {steps.map((step) => (
-          <div
-            key={step.id}
-            className={`p-4 rounded-xl border-2 transition-all ${
-              step.status === "done"
-                ? "border-accent/50 bg-accent/10"
-                : step.status === "error"
-                ? "border-destructive/50 bg-destructive/10"
-                : step.status === "running"
-                ? "border-primary/50 bg-primary/10"
-                : "border-border"
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              {step.status === "running" && (
-                <Loader2 className="w-5 h-5 text-primary animate-spin" />
-              )}
-              {step.status === "done" && (
-                <CheckCircle2 className="w-5 h-5 text-accent" />
-              )}
-              {step.status === "error" && (
-                <AlertCircle className="w-5 h-5 text-destructive" />
-              )}
-              {step.status === "pending" && (
-                <div className="w-5 h-5 rounded-full border-2 border-muted-foreground" />
-              )}
-              <div className="flex-1">
-                <p className="font-medium">{step.label}</p>
-                {step.message && (
-                  <p className="text-sm text-muted-foreground">{step.message}</p>
-                )}
-              </div>
+        {/* Node.js */}
+        <div className={`p-4 rounded-xl border-2 ${
+          nodeStatus === "found" ? "border-accent/50 bg-accent/10" :
+          nodeStatus === "missing" ? "border-destructive/50 bg-destructive/10" :
+          "border-border"
+        }`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              {nodeStatus === "found" && <CheckCircle2 className="w-5 h-5 text-accent" />}
+              {nodeStatus === "missing" && <AlertCircle className="w-5 h-5 text-destructive" />}
+              {nodeStatus === "unknown" && <Terminal className="w-5 h-5 text-muted-foreground" />}
+              <span className="font-medium">Node.js</span>
             </div>
+            {nodeStatus === "found" && (
+              <span className="text-sm text-muted-foreground">{nodeVersion}</span>
+            )}
           </div>
-        ))}
+          {nodeStatus !== "found" && (
+            <div className="mt-2">
+              <code className="block p-2 rounded bg-background text-sm font-mono select-all overflow-x-auto">
+                {installCommands[os].node}
+              </code>
+            </div>
+          )}
+        </div>
+
+        {/* OpenClaw */}
+        <div className={`p-4 rounded-xl border-2 ${
+          openclawStatus === "found" ? "border-accent/50 bg-accent/10" :
+          openclawStatus === "missing" ? "border-destructive/50 bg-destructive/10" :
+          "border-border"
+        }`}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              {openclawStatus === "found" && <CheckCircle2 className="w-5 h-5 text-accent" />}
+              {openclawStatus === "missing" && <AlertCircle className="w-5 h-5 text-destructive" />}
+              {openclawStatus === "unknown" && <Bot className="w-5 h-5 text-muted-foreground" />}
+              <span className="font-medium">OpenClaw</span>
+            </div>
+            {openclawStatus === "found" && (
+              <span className="text-sm text-muted-foreground">{openclawVersion}</span>
+            )}
+          </div>
+          {openclawStatus !== "found" && (
+            <div className="mt-2">
+              <code className="block p-2 rounded bg-background text-sm font-mono select-all">
+                {installCommands[os].openclaw}
+              </code>
+              {os === "macos" && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  💡 If npm fails, try: <code className="bg-background px-1 rounded">brew install openclaw</code>
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {error && (
-        <div className="mt-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30">
-          <p className="text-sm text-destructive">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="mt-2 text-sm text-destructive underline"
-          >
-            Try Again
-          </button>
-        </div>
-      )}
-
-      {status === "done" && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="mt-6"
+      {/* Check Button */}
+      <div className="mt-6 flex gap-3">
+        <button
+          onClick={checkInstallation}
+          disabled={checking}
+          className="flex-1 py-3 bg-secondary hover:bg-secondary/80 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
         >
-          <button
+          {checking ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Checking...
+            </>
+          ) : (
+            <>
+              <Terminal className="w-5 h-5" />
+              Check Installation
+            </>
+          )}
+        </button>
+        
+        {allReady && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
             onClick={onComplete}
-            className="w-full py-3 bg-accent hover:bg-accent-hover rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+            className="flex-1 py-3 bg-accent hover:bg-accent-hover rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
           >
             Continue
             <ChevronRight className="w-5 h-5" />
-          </button>
-        </motion.div>
-      )}
+          </motion.button>
+        )}
+      </div>
+
+      {/* Skip for existing users */}
+      <p className="text-center text-sm text-muted-foreground mt-4">
+        Already have OpenClaw running?{" "}
+        <button onClick={onComplete} className="text-primary hover:underline">
+          Skip this step
+        </button>
+      </p>
     </StepWrapper>
   );
 }

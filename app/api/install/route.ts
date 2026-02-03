@@ -11,6 +11,8 @@ export async function POST(request: Request) {
     switch (action) {
       case "check-node":
         return await checkNode();
+      case "check-openclaw":
+        return await checkOpenClaw();
       case "install-openclaw":
         return await installOpenClaw();
       case "install-provider":
@@ -28,6 +30,20 @@ export async function POST(request: Request) {
   }
 }
 
+async function checkOpenClaw() {
+  try {
+    const { stdout } = await execAsync("openclaw --version");
+    return NextResponse.json({
+      installed: true,
+      version: stdout.trim(),
+    });
+  } catch {
+    return NextResponse.json({
+      installed: false,
+    });
+  }
+}
+
 async function checkNode() {
   try {
     const { stdout: nodeVersion } = await execAsync("node --version");
@@ -35,7 +51,7 @@ async function checkNode() {
     
     return NextResponse.json({
       success: true,
-      node: nodeVersion.trim(),
+      node: nodeVersion.trim().replace(/^v/, ""),
       npm: npmVersion.trim(),
       installed: true,
     });
