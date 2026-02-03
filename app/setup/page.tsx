@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
   Bot,
-  Server,
-  Cloud,
   ChevronRight,
   ChevronLeft,
   Check,
@@ -16,24 +14,21 @@ import {
   Home,
   Cpu,
   Sparkles,
-  Copy,
   Loader2,
   AlertCircle,
   CheckCircle2,
   Terminal,
 } from "lucide-react";
 
-type Step = "deployment" | "installing" | "ai" | "channels" | "integrations" | "complete";
+type Step = "installing" | "ai" | "channels" | "integrations" | "complete";
 
-const STEPS: Step[] = ["deployment", "installing", "ai", "channels", "integrations", "complete"];
+const STEPS: Step[] = ["installing", "ai", "channels", "integrations", "complete"];
 
 export default function SetupPage() {
   const router = useRouter();
-  const [currentStep, setCurrentStep] = useState<Step>("deployment");
+  const [currentStep, setCurrentStep] = useState<Step>("installing");
   const [config, setConfig] = useState({
-    deployment: "" as "local" | "remote" | "",
-    serverUrl: "",
-    gatewayToken: "",
+    deployment: "local" as const,
     aiProviders: [] as string[],
     channels: [] as string[],
     integrations: [] as string[],
@@ -87,17 +82,6 @@ export default function SetupPage() {
       {/* Content */}
       <div className="flex-1 flex items-center justify-center p-8">
         <AnimatePresence mode="wait">
-          {currentStep === "deployment" && (
-            <StepDeployment
-              key="deployment"
-              value={config.deployment}
-              onChange={(v) => setConfig({ ...config, deployment: v })}
-              serverUrl={config.serverUrl}
-              onServerUrlChange={(v) => setConfig({ ...config, serverUrl: v })}
-              gatewayToken={config.gatewayToken}
-              onGatewayTokenChange={(v) => setConfig({ ...config, gatewayToken: v })}
-            />
-          )}
           {currentStep === "installing" && (
             <StepInstalling
               key="installing"
@@ -187,150 +171,6 @@ function StepWrapper({
       <p className="text-muted-foreground mb-8">{description}</p>
       {children}
     </motion.div>
-  );
-}
-
-function StepDeployment({
-  value,
-  onChange,
-  serverUrl,
-  onServerUrlChange,
-  gatewayToken,
-  onGatewayTokenChange,
-}: {
-  value: string;
-  onChange: (v: "local" | "remote") => void;
-  serverUrl: string;
-  onServerUrlChange: (v: string) => void;
-  gatewayToken: string;
-  onGatewayTokenChange: (v: string) => void;
-}) {
-  const options = [
-    {
-      id: "local",
-      icon: Server,
-      title: "This Machine",
-      description: "Run OpenClaw directly on this computer",
-      recommended: true,
-    },
-    {
-      id: "remote",
-      icon: Cloud,
-      title: "Remote Server",
-      description: "Connect to an existing OpenClaw server",
-    },
-  ];
-
-  return (
-    <StepWrapper
-      title="Where is OpenClaw running?"
-      description="Choose where your AI assistant lives"
-    >
-      <div className="space-y-3">
-        {options.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => onChange(opt.id as any)}
-            className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
-              value === opt.id
-                ? "border-primary bg-primary/10"
-                : "border-border hover:border-primary/50"
-            }`}
-          >
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center">
-                <opt.icon className="w-6 h-6" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold">{opt.title}</h3>
-                  {opt.recommended && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
-                      Recommended
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {opt.description}
-                </p>
-              </div>
-              {value === opt.id && (
-                <Check className="w-5 h-5 text-primary flex-shrink-0" />
-              )}
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* Remote Server Config */}
-      {value === "remote" && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="mt-6 space-y-4"
-        >
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Server Address
-            </label>
-            <input
-              type="text"
-              placeholder="e.g., 192.168.1.82 or myserver.local"
-              value={serverUrl}
-              onChange={(e) => onServerUrlChange(e.target.value)}
-              className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              IP address or hostname of your OpenClaw server
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Gateway Token
-            </label>
-            <input
-              type="password"
-              placeholder="Paste your gateway token"
-              value={gatewayToken}
-              onChange={(e) => onGatewayTokenChange(e.target.value)}
-              className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
-            />
-            <div className="mt-3 p-3 rounded-lg bg-card border border-border">
-              <p className="text-sm text-muted-foreground mb-2">
-                Run this on your server to get the token:
-              </p>
-              <code className="block p-2 rounded bg-background text-sm font-mono text-accent select-all">
-                openclaw config get gateway.token
-              </code>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Local Install Info */}
-      {value === "local" && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="mt-6 p-4 rounded-xl bg-card border border-border"
-        >
-          <p className="text-sm text-muted-foreground mb-2">
-            We'll help you install OpenClaw on this machine. Make sure you have:
-          </p>
-          <ul className="text-sm space-y-1">
-            <li className="flex items-center gap-2">
-              <Check className="w-4 h-4 text-accent" />
-              Node.js 18+ installed
-            </li>
-            <li className="flex items-center gap-2">
-              <Check className="w-4 h-4 text-accent" />
-              npm or pnpm available
-            </li>
-          </ul>
-        </motion.div>
-      )}
-    </StepWrapper>
   );
 }
 
