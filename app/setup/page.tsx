@@ -21,9 +21,27 @@ type Step = "installing" | "ai" | "channels" | "gateway" | "complete";
 
 const STEPS: Step[] = ["installing", "ai", "channels", "gateway", "complete"];
 
+// Detection state for existing setup
+type DetectionState = {
+  checked: boolean;
+  openclawInstalled: boolean;
+  gatewayRunning: boolean;
+  anthropicAuth: boolean;
+  openaiAuth: boolean;
+  ollamaRunning: boolean;
+};
+
 export default function SetupPage() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState<Step>("installing");
+  const [detection, setDetection] = useState<DetectionState>({
+    checked: false,
+    openclawInstalled: false,
+    gatewayRunning: false,
+    anthropicAuth: false,
+    openaiAuth: false,
+    ollamaRunning: false,
+  });
   const [config, setConfig] = useState({
     deployment: "local" as const,
     // AI Provider
@@ -38,6 +56,93 @@ export default function SetupPage() {
     telegramAllowFrom: "",
     discordToken: "",
   });
+
+  // Auto-detect existing setup on mount
+  useEffect(() => {
+    async function detectSetup() {
+      const results: Partial<DetectionState> = { checked: true };
+
+      // Check OpenClaw installed
+      try {
+        const res = await fetch("/api/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "check-openclaw" }),
+        });
+        const data = await res.json();
+        results.openclawInstalled = data.installed;
+      } catch {
+        results.openclawInstalled = false;
+      }
+
+      // Check gateway running
+      try {
+        const res = await fetch("/api/gateway", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "status" }),
+        });
+        const data = await res.json();
+        results.gatewayRunning = data.running;
+      } catch {
+        results.gatewayRunning = false;
+      }
+
+      // Check Anthropic auth
+      try {
+        const res = await fetch("/api/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "check-auth", provider: "anthropic" }),
+        });
+        const data = await res.json();
+        results.anthropicAuth = data.authenticated;
+      } catch {
+        results.anthropicAuth = false;
+      }
+
+      // Check OpenAI auth
+      try {
+        const res = await fetch("/api/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "check-auth", provider: "openai" }),
+        });
+        const data = await res.json();
+        results.openaiAuth = data.authenticated;
+      } catch {
+        results.openaiAuth = false;
+      }
+
+      // Check Ollama
+      try {
+        await fetch("http://localhost:11434/api/tags");
+        results.ollamaRunning = true;
+      } catch {
+        results.ollamaRunning = false;
+      }
+
+      setDetection(results as DetectionState);
+
+      // Auto-select provider if one is authenticated
+      if (results.anthropicAuth) {
+        setConfig(c => ({ ...c, aiProvider: "anthropic" }));
+      } else if (results.openaiAuth) {
+        setConfig(c => ({ ...c, aiProvider: "openai" }));
+      } else if (results.ollamaRunning) {
+        setConfig(c => ({ ...c, aiProvider: "ollama" }));
+      }
+
+      // Skip to appropriate step if already set up
+      if (results.openclawInstalled && (results.anthropicAuth || results.openaiAuth || results.ollamaRunning)) {
+        setCurrentStep("channels");
+      } else if (results.openclawInstalled) {
+        setCurrentStep("ai");
+      }
+    }
+
+    detectSetup();
+  }, []);
 
   const stepIndex = STEPS.indexOf(currentStep);
   const progress = ((stepIndex + 1) / STEPS.length) * 100;
@@ -84,6 +189,33 @@ export default function SetupPage() {
         </div>
       </header>
 
+      {/* Detection Banner */}
+      {detection.checked && (detection.openclawInstalled || detection.anthropicAuth || detection.openaiAuth || detection.ollamaRunning || detection.gatewayRunning) && (
+        <div className="mx-6 mt-4 p-4 rounded-xl bg-accent/10 border border-accent/30">
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle2 className="w-5 h-5 text-accent" />
+            <span className="font-medium">Existing setup detected!</span>
+          </div>
+          <div className="flex flex-wrap gap-2 text-sm">
+            {detection.openclawInstalled && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ OpenClaw</span>
+            )}
+            {detection.gatewayRunning && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Gateway Running</span>
+            )}
+            {detection.anthropicAuth && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Anthropic Auth</span>
+            )}
+            {detection.openaiAuth && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ OpenAI Auth</span>
+            )}
+            {detection.ollamaRunning && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Ollama</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 flex items-center justify-center p-8">
         <AnimatePresence mode="wait">
@@ -91,6 +223,7 @@ export default function SetupPage() {
             <StepInstalling
               key="installing"
               deployment={config.deployment}
+              detection={detection}
               onComplete={() => nextStep()}
             />
           )}
@@ -98,6 +231,7 @@ export default function SetupPage() {
             <StepAI
               key="ai"
               config={config}
+              detection={detection}
               onChange={(updates) => setConfig({ ...config, ...updates })}
             />
           )}
@@ -112,6 +246,7 @@ export default function SetupPage() {
             <StepGateway
               key="gateway"
               config={config}
+              detection={detection}
               onComplete={() => nextStep()}
             />
           )}
@@ -193,9 +328,11 @@ function detectOS(): OS {
 }
 
 function StepInstalling({
+  detection,
   onComplete,
 }: {
   deployment: string;
+  detection: DetectionState;
   onComplete: () => void;
 }) {
   const [os, setOs] = useState<OS>("unknown");
@@ -207,7 +344,14 @@ function StepInstalling({
 
   useEffect(() => {
     setOs(detectOS());
-  }, []);
+    // Use detection results if available
+    if (detection.checked && detection.openclawInstalled) {
+      setOpenclawStatus("found");
+      setOpenclawVersion("detected");
+      // Also check node
+      checkInstallation();
+    }
+  }, [detection.checked]);
 
   async function checkInstallation() {
     setChecking(true);
@@ -387,21 +531,31 @@ function StepInstalling({
 
 function StepAI({
   config,
+  detection,
   onChange,
 }: {
   config: any;
+  detection: DetectionState;
   onChange: (updates: any) => void;
 }) {
-  const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
-  const [authStatus, setAuthStatus] = useState<Record<string, "checking" | "authenticated" | "none">>({});
+  // Initialize from detection state
+  const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">(
+    detection.ollamaRunning ? "online" : "checking"
+  );
+  const [authStatus, setAuthStatus] = useState<Record<string, "checking" | "authenticated" | "none">>({
+    anthropic: detection.anthropicAuth ? "authenticated" : "none",
+    openai: detection.openaiAuth ? "authenticated" : "none",
+  });
   const [checkingAuth, setCheckingAuth] = useState(false);
 
   useEffect(() => {
-    // Check if Ollama is running
-    fetch("http://localhost:11434/api/tags")
-      .then(() => setOllamaStatus("online"))
-      .catch(() => setOllamaStatus("offline"));
-  }, []);
+    // Check if Ollama is running (only if not already detected)
+    if (!detection.ollamaRunning) {
+      fetch("http://localhost:11434/api/tags")
+        .then(() => setOllamaStatus("online"))
+        .catch(() => setOllamaStatus("offline"));
+    }
+  }, [detection.ollamaRunning]);
 
   // Check existing auth when provider is selected
   async function checkAuth(provider: string) {
@@ -793,12 +947,17 @@ function StepChannels({
 
 function StepGateway({
   config,
+  detection,
   onComplete,
 }: {
   config: any;
+  detection: DetectionState;
   onComplete: () => void;
 }) {
-  const [status, setStatus] = useState<"idle" | "saving" | "starting" | "done" | "error">("idle");
+  // If gateway is already running and provider is auth'd, show as already done
+  const [status, setStatus] = useState<"idle" | "saving" | "starting" | "done" | "error">(
+    detection.gatewayRunning ? "done" : "idle"
+  );
   const [error, setError] = useState<string | null>(null);
 
   async function startSetup() {
