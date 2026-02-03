@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   Bot,
   Server,
-  Container,
   Cloud,
   ChevronRight,
   ChevronLeft,
@@ -17,6 +16,7 @@ import {
   Home,
   Cpu,
   Sparkles,
+  Copy,
 } from "lucide-react";
 
 type Step = "deployment" | "ai" | "channels" | "integrations" | "complete";
@@ -27,7 +27,9 @@ export default function SetupPage() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState<Step>("deployment");
   const [config, setConfig] = useState({
-    deployment: "" as "local" | "docker" | "remote" | "",
+    deployment: "" as "local" | "remote" | "",
+    serverUrl: "",
+    gatewayToken: "",
     aiProviders: [] as string[],
     channels: [] as string[],
     integrations: [] as string[],
@@ -86,6 +88,10 @@ export default function SetupPage() {
               key="deployment"
               value={config.deployment}
               onChange={(v) => setConfig({ ...config, deployment: v })}
+              serverUrl={config.serverUrl}
+              onServerUrlChange={(v) => setConfig({ ...config, serverUrl: v })}
+              gatewayToken={config.gatewayToken}
+              onGatewayTokenChange={(v) => setConfig({ ...config, gatewayToken: v })}
             />
           )}
           {currentStep === "ai" && (
@@ -176,9 +182,17 @@ function StepWrapper({
 function StepDeployment({
   value,
   onChange,
+  serverUrl,
+  onServerUrlChange,
+  gatewayToken,
+  onGatewayTokenChange,
 }: {
   value: string;
-  onChange: (v: "local" | "docker" | "remote") => void;
+  onChange: (v: "local" | "remote") => void;
+  serverUrl: string;
+  onServerUrlChange: (v: string) => void;
+  gatewayToken: string;
+  onGatewayTokenChange: (v: string) => void;
 }) {
   const options = [
     {
@@ -187,12 +201,6 @@ function StepDeployment({
       title: "This Machine",
       description: "Run OpenClaw directly on this computer",
       recommended: true,
-    },
-    {
-      id: "docker",
-      icon: Container,
-      title: "Docker Container",
-      description: "Run in an isolated Docker environment",
     },
     {
       id: "remote",
@@ -204,8 +212,8 @@ function StepDeployment({
 
   return (
     <StepWrapper
-      title="Where should OpenClaw run?"
-      description="Choose how you want to deploy your AI assistant"
+      title="Where is OpenClaw running?"
+      description="Choose where your AI assistant lives"
     >
       <div className="space-y-3">
         {options.map((opt) => (
@@ -242,6 +250,75 @@ function StepDeployment({
           </button>
         ))}
       </div>
+
+      {/* Remote Server Config */}
+      {value === "remote" && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="mt-6 space-y-4"
+        >
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Server Address
+            </label>
+            <input
+              type="text"
+              placeholder="e.g., 192.168.1.82 or myserver.local"
+              value={serverUrl}
+              onChange={(e) => onServerUrlChange(e.target.value)}
+              className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              IP address or hostname of your OpenClaw server
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Gateway Token
+            </label>
+            <input
+              type="password"
+              placeholder="Paste your gateway token"
+              value={gatewayToken}
+              onChange={(e) => onGatewayTokenChange(e.target.value)}
+              className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+            />
+            <div className="mt-3 p-3 rounded-lg bg-card border border-border">
+              <p className="text-sm text-muted-foreground mb-2">
+                Run this on your server to get the token:
+              </p>
+              <code className="block p-2 rounded bg-background text-sm font-mono text-accent select-all">
+                openclaw config get gateway.token
+              </code>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Local Install Info */}
+      {value === "local" && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="mt-6 p-4 rounded-xl bg-card border border-border"
+        >
+          <p className="text-sm text-muted-foreground mb-2">
+            We'll help you install OpenClaw on this machine. Make sure you have:
+          </p>
+          <ul className="text-sm space-y-1">
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-accent" />
+              Node.js 18+ installed
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-accent" />
+              npm or pnpm available
+            </li>
+          </ul>
+        </motion.div>
+      )}
     </StepWrapper>
   );
 }
