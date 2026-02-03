@@ -8,30 +8,34 @@ import {
   ChevronRight,
   ChevronLeft,
   Check,
-  MessageSquare,
-  Mail,
-  Calendar,
-  Home,
   Cpu,
   Sparkles,
   Loader2,
   AlertCircle,
   CheckCircle2,
   Terminal,
+  Key,
 } from "lucide-react";
 
-type Step = "installing" | "ai" | "channels" | "integrations" | "complete";
+type Step = "installing" | "ai" | "channels" | "gateway" | "complete";
 
-const STEPS: Step[] = ["installing", "ai", "channels", "integrations", "complete"];
+const STEPS: Step[] = ["installing", "ai", "channels", "gateway", "complete"];
 
 export default function SetupPage() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState<Step>("installing");
   const [config, setConfig] = useState({
     deployment: "local" as const,
-    aiProviders: [] as string[],
-    channels: [] as string[],
-    integrations: [] as string[],
+    // AI Provider
+    aiProvider: "" as "anthropic" | "openai" | "ollama" | "",
+    anthropicKey: "",
+    openaiKey: "",
+    ollamaUrl: "http://localhost:11434",
+    // Channel
+    channel: "" as "telegram" | "discord" | "",
+    telegramToken: "",
+    telegramAllowFrom: "",
+    discordToken: "",
   });
 
   const stepIndex = STEPS.indexOf(currentStep);
@@ -92,22 +96,22 @@ export default function SetupPage() {
           {currentStep === "ai" && (
             <StepAI
               key="ai"
-              value={config.aiProviders}
-              onChange={(v) => setConfig({ ...config, aiProviders: v })}
+              config={config}
+              onChange={(updates) => setConfig({ ...config, ...updates })}
             />
           )}
           {currentStep === "channels" && (
             <StepChannels
               key="channels"
-              value={config.channels}
-              onChange={(v) => setConfig({ ...config, channels: v })}
+              config={config}
+              onChange={(updates) => setConfig({ ...config, ...updates })}
             />
           )}
-          {currentStep === "integrations" && (
-            <StepIntegrations
-              key="integrations"
-              value={config.integrations}
-              onChange={(v) => setConfig({ ...config, integrations: v })}
+          {currentStep === "gateway" && (
+            <StepGateway
+              key="gateway"
+              config={config}
+              onComplete={() => nextStep()}
             />
           )}
           {currentStep === "complete" && (
@@ -381,278 +385,524 @@ function StepInstalling({
 }
 
 function StepAI({
-  value,
+  config,
   onChange,
 }: {
-  value: string[];
-  onChange: (v: string[]) => void;
+  config: any;
+  onChange: (updates: any) => void;
 }) {
-  const [installing, setInstalling] = useState<string | null>(null);
-  const [installed, setInstalled] = useState<Record<string, boolean>>({});
+  const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
+
+  useEffect(() => {
+    // Check if Ollama is running
+    fetch("http://localhost:11434/api/tags")
+      .then(() => setOllamaStatus("online"))
+      .catch(() => setOllamaStatus("offline"));
+  }, []);
 
   const providers = [
-    { id: "anthropic", name: "Anthropic", model: "Claude Code", logo: "🧠", installable: true },
-    { id: "openai", name: "OpenAI", model: "Codex CLI", logo: "🤖", installable: true },
-    { id: "google", name: "Google", model: "Gemini", logo: "✨", installable: false },
-    { id: "ollama", name: "Ollama", model: "Local Models", logo: "🦙", free: true, installable: false },
+    { 
+      id: "anthropic", 
+      name: "Anthropic", 
+      model: "Claude (Recommended)", 
+      logo: "🧠",
+      keyPlaceholder: "sk-ant-...",
+      keyLink: "https://console.anthropic.com/account/keys"
+    },
+    { 
+      id: "openai", 
+      name: "OpenAI", 
+      model: "GPT-4 / GPT-5", 
+      logo: "🤖",
+      keyPlaceholder: "sk-...",
+      keyLink: "https://platform.openai.com/api-keys"
+    },
+    { 
+      id: "ollama", 
+      name: "Ollama", 
+      model: "Local & Free", 
+      logo: "🦙",
+      free: true
+    },
   ];
-
-  async function toggle(id: string) {
-    const provider = providers.find((p) => p.id === id);
-    
-    if (value.includes(id)) {
-      onChange(value.filter((v) => v !== id));
-      return;
-    }
-
-    // If installable, install the CLI
-    if (provider?.installable && !installed[id]) {
-      setInstalling(id);
-      try {
-        const res = await fetch("/api/install", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "install-provider", provider: id }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          setInstalled((prev) => ({ ...prev, [id]: true }));
-        }
-      } catch (e) {
-        console.error("Install failed:", e);
-      }
-      setInstalling(null);
-    }
-
-    onChange([...value, id]);
-  }
 
   return (
     <StepWrapper
-      title="Choose your AI providers"
-      description="Select providers. We'll install their CLI tools automatically."
+      title="Choose your AI"
+      description="Pick a provider and enter your API key"
     >
-      <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-3">
         {providers.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => toggle(p.id)}
-            disabled={installing === p.id}
-            className={`p-4 rounded-xl border-2 text-left transition-all ${
-              value.includes(p.id)
-                ? "border-primary bg-primary/10"
-                : "border-border hover:border-primary/50"
-            } ${installing === p.id ? "opacity-70" : ""}`}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-2xl">{p.logo}</span>
-              <div className="flex gap-1">
-                {p.free && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
-                    Free
-                  </span>
-                )}
-                {installed[p.id] && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
-                    ✓ Installed
-                  </span>
+          <div key={p.id}>
+            <button
+              onClick={() => onChange({ aiProvider: p.id })}
+              className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                config.aiProvider === p.id
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/50"
+              }`}
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-3xl">{p.logo}</span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">{p.name}</h3>
+                    {p.free && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                        Free
+                      </span>
+                    )}
+                    {p.id === "ollama" && ollamaStatus === "online" && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                        ✓ Running
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{p.model}</p>
+                </div>
+                {config.aiProvider === p.id && (
+                  <Check className="w-5 h-5 text-primary" />
                 )}
               </div>
-            </div>
-            <h3 className="font-semibold flex items-center gap-2">
-              {p.name}
-              {installing === p.id && (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              )}
-            </h3>
-            <p className="text-sm text-muted-foreground">{p.model}</p>
-            {p.installable && !installed[p.id] && !value.includes(p.id) && (
-              <p className="text-xs text-primary mt-1">Click to install CLI</p>
+            </button>
+
+            {/* API Key Input */}
+            {config.aiProvider === p.id && p.id === "anthropic" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-card border border-border"
+              >
+                <label className="block text-sm font-medium mb-2">Anthropic API Key</label>
+                <input
+                  type="password"
+                  placeholder={p.keyPlaceholder}
+                  value={config.anthropicKey}
+                  onChange={(e) => onChange({ anthropicKey: e.target.value })}
+                  className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+                />
+                <a 
+                  href={p.keyLink} 
+                  target="_blank" 
+                  className="text-xs text-primary hover:underline mt-2 inline-block"
+                >
+                  Get your API key →
+                </a>
+              </motion.div>
             )}
-          </button>
+
+            {config.aiProvider === p.id && p.id === "openai" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-card border border-border"
+              >
+                <label className="block text-sm font-medium mb-2">OpenAI API Key</label>
+                <input
+                  type="password"
+                  placeholder={p.keyPlaceholder}
+                  value={config.openaiKey}
+                  onChange={(e) => onChange({ openaiKey: e.target.value })}
+                  className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+                />
+                <a 
+                  href={p.keyLink} 
+                  target="_blank" 
+                  className="text-xs text-primary hover:underline mt-2 inline-block"
+                >
+                  Get your API key →
+                </a>
+              </motion.div>
+            )}
+
+            {config.aiProvider === p.id && p.id === "ollama" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-card border border-border"
+              >
+                {ollamaStatus === "online" ? (
+                  <div className="flex items-center gap-2 text-accent">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span>Ollama is running on localhost:11434</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-destructive">
+                      <AlertCircle className="w-5 h-5" />
+                      <span>Ollama not detected</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Install from{" "}
+                      <a href="https://ollama.ai" target="_blank" className="text-primary underline">
+                        ollama.ai
+                      </a>
+                      {" "}then run: <code className="bg-background px-1 rounded">ollama serve</code>
+                    </p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </div>
         ))}
       </div>
-
-      {value.includes("anthropic") && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="mt-4 p-4 rounded-xl bg-primary/10 border border-primary/30"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <Terminal className="w-5 h-5 text-primary" />
-            <span className="font-medium">Claude Code CLI</span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            You'll need to authenticate with: <code className="bg-background px-1 rounded">claude auth</code>
-          </p>
-        </motion.div>
-      )}
-
-      {value.includes("openai") && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="mt-4 p-4 rounded-xl bg-primary/10 border border-primary/30"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <Terminal className="w-5 h-5 text-primary" />
-            <span className="font-medium">OpenAI Codex CLI</span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Set your API key: <code className="bg-background px-1 rounded">export OPENAI_API_KEY=sk-...</code>
-          </p>
-        </motion.div>
-      )}
-
-      {value.includes("ollama") && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="mt-4 p-4 rounded-xl bg-accent/10 border border-accent/30"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <Cpu className="w-5 h-5 text-accent" />
-            <span className="font-medium">Ollama (Local)</span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Run models locally for free. Get it at <a href="https://ollama.ai" target="_blank" className="text-accent underline">ollama.ai</a>
-          </p>
-        </motion.div>
-      )}
     </StepWrapper>
   );
 }
 
 function StepChannels({
-  value,
+  config,
   onChange,
 }: {
-  value: string[];
-  onChange: (v: string[]) => void;
+  config: any;
+  onChange: (updates: any) => void;
 }) {
   const channels = [
-    { id: "telegram", name: "Telegram", icon: "📱" },
-    { id: "discord", name: "Discord", icon: "🎮" },
-    { id: "slack", name: "Slack", icon: "💼" },
-    { id: "sms", name: "SMS", icon: "💬" },
-    { id: "web", name: "Web Chat", icon: "🌐" },
+    { 
+      id: "telegram", 
+      name: "Telegram", 
+      icon: "📱",
+      description: "Easiest to set up",
+      recommended: true
+    },
+    { 
+      id: "discord", 
+      name: "Discord", 
+      icon: "🎮",
+      description: "Great for servers"
+    },
   ];
-
-  function toggle(id: string) {
-    if (value.includes(id)) {
-      onChange(value.filter((v) => v !== id));
-    } else {
-      onChange([...value, id]);
-    }
-  }
 
   return (
     <StepWrapper
-      title="How do you want to chat?"
-      description="Choose where you'll interact with your AI assistant"
-    >
-      <div className="grid grid-cols-2 gap-3">
-        {channels.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => toggle(c.id)}
-            className={`p-4 rounded-xl border-2 text-left transition-all ${
-              value.includes(c.id)
-                ? "border-primary bg-primary/10"
-                : "border-border hover:border-primary/50"
-            }`}
-          >
-            <span className="text-2xl mb-2 block">{c.icon}</span>
-            <h3 className="font-semibold">{c.name}</h3>
-          </button>
-        ))}
-      </div>
-    </StepWrapper>
-  );
-}
-
-function StepIntegrations({
-  value,
-  onChange,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-}) {
-  const integrations = [
-    { id: "email", name: "Email", description: "Gmail, Outlook", icon: Mail },
-    { id: "calendar", name: "Calendar", description: "Google, Apple", icon: Calendar },
-    { id: "smarthome", name: "Smart Home", description: "HomeKit, Google", icon: Home },
-  ];
-
-  function toggle(id: string) {
-    if (value.includes(id)) {
-      onChange(value.filter((v) => v !== id));
-    } else {
-      onChange([...value, id]);
-    }
-  }
-
-  return (
-    <StepWrapper
-      title="Connect your services"
-      description="Optional: Link services for a smarter assistant"
+      title="Connect a chat channel"
+      description="Where do you want to talk to your AI?"
     >
       <div className="space-y-3">
-        {integrations.map((i) => (
-          <button
-            key={i.id}
-            onClick={() => toggle(i.id)}
-            className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
-              value.includes(i.id)
-                ? "border-primary bg-primary/10"
-                : "border-border hover:border-primary/50"
-            }`}
-          >
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center">
-                <i.icon className="w-6 h-6" />
+        {channels.map((c) => (
+          <div key={c.id}>
+            <button
+              onClick={() => onChange({ channel: c.id })}
+              className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                config.channel === c.id
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/50"
+              }`}
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-3xl">{c.icon}</span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">{c.name}</h3>
+                    {c.recommended && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                        Recommended
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{c.description}</p>
+                </div>
+                {config.channel === c.id && (
+                  <Check className="w-5 h-5 text-primary" />
+                )}
               </div>
-              <div className="flex-1">
-                <h3 className="font-semibold">{i.name}</h3>
-                <p className="text-sm text-muted-foreground">{i.description}</p>
-              </div>
-              {value.includes(i.id) && <Check className="w-5 h-5 text-primary" />}
-            </div>
-          </button>
+            </button>
+
+            {/* Telegram Setup */}
+            {config.channel === "telegram" && c.id === "telegram" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-card border border-border space-y-4"
+              >
+                <div className="p-3 rounded-lg bg-secondary/50 text-sm">
+                  <p className="font-medium mb-2">📝 How to get a Telegram Bot Token:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                    <li>Open Telegram and search for <code className="bg-background px-1 rounded">@BotFather</code></li>
+                    <li>Send <code className="bg-background px-1 rounded">/newbot</code> and follow prompts</li>
+                    <li>Copy the token BotFather gives you</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Bot Token</label>
+                  <input
+                    type="password"
+                    placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    value={config.telegramToken}
+                    onChange={(e) => onChange({ telegramToken: e.target.value })}
+                    className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Your Telegram User ID <span className="text-muted-foreground">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="123456789"
+                    value={config.telegramAllowFrom}
+                    onChange={(e) => onChange({ telegramAllowFrom: e.target.value })}
+                    className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Send <code className="bg-background px-1 rounded">/start</code> to <code className="bg-background px-1 rounded">@userinfobot</code> to get your ID
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Discord Setup */}
+            {config.channel === "discord" && c.id === "discord" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-card border border-border space-y-4"
+              >
+                <div className="p-3 rounded-lg bg-secondary/50 text-sm">
+                  <p className="font-medium mb-2">📝 How to get a Discord Bot Token:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+                    <li>Go to <a href="https://discord.com/developers/applications" target="_blank" className="text-primary underline">Discord Developer Portal</a></li>
+                    <li>Create New Application → Bot → Reset Token</li>
+                    <li>Enable "Message Content Intent" under Bot settings</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Bot Token</label>
+                  <input
+                    type="password"
+                    placeholder="MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.Gh..."
+                    value={config.discordToken}
+                    onChange={(e) => onChange({ discordToken: e.target.value })}
+                    className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </div>
         ))}
       </div>
 
       <p className="mt-4 text-sm text-muted-foreground text-center">
-        You can skip this and add integrations later
+        You can add more channels later in Settings
       </p>
     </StepWrapper>
   );
 }
 
+function StepGateway({
+  config,
+  onComplete,
+}: {
+  config: any;
+  onComplete: () => void;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "starting" | "done" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  async function startSetup() {
+    setStatus("saving");
+    setError(null);
+
+    try {
+      // Build config to save
+      const configPatch: Record<string, any> = {};
+
+      // AI Provider
+      if (config.aiProvider === "anthropic" && config.anthropicKey) {
+        configPatch["env.vars.ANTHROPIC_API_KEY"] = config.anthropicKey;
+        configPatch["agents.defaults.model.primary"] = "anthropic/claude-sonnet-4-20250514";
+      } else if (config.aiProvider === "openai" && config.openaiKey) {
+        configPatch["env.vars.OPENAI_API_KEY"] = config.openaiKey;
+        configPatch["agents.defaults.model.primary"] = "openai/gpt-4o";
+      } else if (config.aiProvider === "ollama") {
+        configPatch["agents.defaults.model.primary"] = "ollama/llama3.2";
+      }
+
+      // Channel
+      if (config.channel === "telegram" && config.telegramToken) {
+        configPatch["channels.telegram.botToken"] = config.telegramToken;
+        configPatch["channels.telegram.dmPolicy"] = "pairing";
+        if (config.telegramAllowFrom) {
+          configPatch["channels.telegram.allowFrom"] = [config.telegramAllowFrom];
+        }
+      } else if (config.channel === "discord" && config.discordToken) {
+        configPatch["channels.discord.token"] = config.discordToken;
+      }
+
+      // Save config
+      const saveRes = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config-patch", config: configPatch }),
+      });
+
+      if (!saveRes.ok) {
+        throw new Error("Failed to save configuration");
+      }
+
+      setStatus("starting");
+
+      // Start gateway
+      const startRes = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start" }),
+      });
+
+      const startData = await startRes.json();
+
+      if (startData.running) {
+        setStatus("done");
+      } else {
+        throw new Error(startData.error || "Failed to start gateway");
+      }
+    } catch (e: any) {
+      setError(e.message);
+      setStatus("error");
+    }
+  }
+
+  return (
+    <StepWrapper
+      title="Start OpenClaw"
+      description="Save your settings and launch the gateway"
+    >
+      <div className="space-y-4">
+        {/* Summary */}
+        <div className="p-4 rounded-xl bg-card border border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">AI Provider</span>
+            <span className="font-medium capitalize">{config.aiProvider || "Not set"}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Channel</span>
+            <span className="font-medium capitalize">{config.channel || "Not set"}</span>
+          </div>
+          {config.aiProvider && !["ollama"].includes(config.aiProvider) && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">API Key</span>
+              <span className="font-medium text-accent">
+                {(config.anthropicKey || config.openaiKey) ? "✓ Provided" : "⚠ Missing"}
+              </span>
+            </div>
+          )}
+          {config.channel === "telegram" && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Bot Token</span>
+              <span className="font-medium text-accent">
+                {config.telegramToken ? "✓ Provided" : "⚠ Missing"}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Status */}
+        {status === "saving" && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/10 border border-primary/30">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <span>Saving configuration...</span>
+          </div>
+        )}
+
+        {status === "starting" && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/10 border border-primary/30">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <span>Starting gateway...</span>
+          </div>
+        )}
+
+        {status === "done" && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-accent/10 border border-accent/30">
+            <CheckCircle2 className="w-5 h-5 text-accent" />
+            <span>Gateway is running!</span>
+          </div>
+        )}
+
+        {status === "error" && (
+          <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30">
+            <div className="flex items-center gap-2 text-destructive mb-2">
+              <AlertCircle className="w-5 h-5" />
+              <span className="font-medium">Setup failed</span>
+            </div>
+            <p className="text-sm text-muted-foreground">{error}</p>
+            <button
+              onClick={startSetup}
+              className="mt-3 text-sm text-destructive underline"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {/* Action Button */}
+        {status === "idle" && (
+          <button
+            onClick={startSetup}
+            disabled={!config.aiProvider || !config.channel}
+            className="w-full py-4 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+          >
+            <Sparkles className="w-5 h-5" />
+            Launch OpenClaw
+          </button>
+        )}
+
+        {status === "done" && (
+          <button
+            onClick={onComplete}
+            className="w-full py-4 bg-accent hover:bg-accent-hover rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+          >
+            Continue
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+    </StepWrapper>
+  );
+}
+
 function StepComplete({ config }: { config: any }) {
+  const router = useRouter();
+
   return (
     <StepWrapper
       title="You're all set! 🎉"
-      description="OpenClaw is ready to launch"
+      description="OpenClaw is running and ready"
     >
-      <div className="glass rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Deployment</span>
-          <span className="font-medium capitalize">{config.deployment || "Not set"}</span>
+      <div className="space-y-6">
+        <div className="p-6 rounded-xl bg-accent/10 border border-accent/30 text-center">
+          <div className="text-5xl mb-4">🤖</div>
+          <h3 className="font-bold text-lg mb-2">Your AI assistant is live!</h3>
+          {config.channel === "telegram" && (
+            <p className="text-muted-foreground">
+              Open Telegram and send a message to your bot to start chatting
+            </p>
+          )}
+          {config.channel === "discord" && (
+            <p className="text-muted-foreground">
+              Invite your bot to a server and mention it to start chatting
+            </p>
+          )}
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">AI Providers</span>
-          <span className="font-medium">{config.aiProviders.length} selected</span>
+
+        <div className="p-4 rounded-xl bg-card border border-border space-y-3">
+          <h4 className="font-medium">What's next?</h4>
+          <ul className="text-sm text-muted-foreground space-y-2">
+            <li>• Send your first message in {config.channel}</li>
+            <li>• Explore the dashboard to see activity</li>
+            <li>• Add more channels in Settings</li>
+          </ul>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Channels</span>
-          <span className="font-medium">{config.channels.length} selected</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Integrations</span>
-          <span className="font-medium">{config.integrations.length} selected</span>
-        </div>
+
+        <button
+          onClick={() => router.push("/")}
+          className="w-full py-4 bg-primary hover:bg-primary-hover rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+        >
+          Go to Dashboard
+          <ChevronRight className="w-5 h-5" />
+        </button>
       </div>
     </StepWrapper>
   );
