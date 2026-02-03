@@ -17,11 +17,15 @@ import {
   Cpu,
   Sparkles,
   Copy,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  Terminal,
 } from "lucide-react";
 
-type Step = "deployment" | "ai" | "channels" | "integrations" | "complete";
+type Step = "deployment" | "installing" | "ai" | "channels" | "integrations" | "complete";
 
-const STEPS: Step[] = ["deployment", "ai", "channels", "integrations", "complete"];
+const STEPS: Step[] = ["deployment", "installing", "ai", "channels", "integrations", "complete"];
 
 export default function SetupPage() {
   const router = useRouter();
@@ -92,6 +96,13 @@ export default function SetupPage() {
               onServerUrlChange={(v) => setConfig({ ...config, serverUrl: v })}
               gatewayToken={config.gatewayToken}
               onGatewayTokenChange={(v) => setConfig({ ...config, gatewayToken: v })}
+            />
+          )}
+          {currentStep === "installing" && (
+            <StepInstalling
+              key="installing"
+              deployment={config.deployment}
+              onComplete={() => nextStep()}
             />
           )}
           {currentStep === "ai" && (
@@ -323,6 +334,174 @@ function StepDeployment({
   );
 }
 
+function StepInstalling({
+  deployment,
+  onComplete,
+}: {
+  deployment: string;
+  onComplete: () => void;
+}) {
+  const [status, setStatus] = useState<"checking" | "installing" | "done" | "error">("checking");
+  const [steps, setSteps] = useState([
+    { id: "node", label: "Node.js & npm", status: "pending" as "pending" | "running" | "done" | "error", message: "" },
+    { id: "openclaw", label: "OpenClaw", status: "pending" as "pending" | "running" | "done" | "error", message: "" },
+  ]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (deployment === "local") {
+      runInstallation();
+    } else {
+      // Remote server - skip installation
+      onComplete();
+    }
+  }, [deployment]);
+
+  async function runInstallation() {
+    setStatus("checking");
+
+    // Step 1: Check Node.js
+    updateStep("node", "running", "Checking Node.js...");
+    try {
+      const res = await fetch("/api/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-node" }),
+      });
+      const data = await res.json();
+      
+      if (data.installed) {
+        updateStep("node", "done", `Found Node ${data.node}, npm ${data.npm}`);
+      } else {
+        updateStep("node", "error", "Node.js not installed");
+        setError("Please install Node.js from https://nodejs.org first, then restart setup.");
+        setStatus("error");
+        return;
+      }
+    } catch (e) {
+      updateStep("node", "error", "Could not check Node.js");
+      setError("Failed to check system requirements");
+      setStatus("error");
+      return;
+    }
+
+    // Step 2: Install OpenClaw
+    setStatus("installing");
+    updateStep("openclaw", "running", "Installing OpenClaw...");
+    try {
+      const res = await fetch("/api/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "install-openclaw" }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        if (data.alreadyInstalled) {
+          updateStep("openclaw", "done", `Already installed (${data.version})`);
+        } else {
+          updateStep("openclaw", "done", "Installed successfully!");
+        }
+      } else {
+        updateStep("openclaw", "error", data.error || "Installation failed");
+        setError(data.error || "Failed to install OpenClaw");
+        setStatus("error");
+        return;
+      }
+    } catch (e) {
+      updateStep("openclaw", "error", "Installation failed");
+      setError("Failed to install OpenClaw");
+      setStatus("error");
+      return;
+    }
+
+    setStatus("done");
+  }
+
+  function updateStep(id: string, status: "pending" | "running" | "done" | "error", message: string) {
+    setSteps((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, status, message } : s))
+    );
+  }
+
+  return (
+    <StepWrapper
+      title={status === "done" ? "All Set! ✓" : "Setting Up..."}
+      description={
+        status === "done"
+          ? "OpenClaw is installed and ready"
+          : "Installing required components"
+      }
+    >
+      <div className="space-y-4">
+        {steps.map((step) => (
+          <div
+            key={step.id}
+            className={`p-4 rounded-xl border-2 transition-all ${
+              step.status === "done"
+                ? "border-accent/50 bg-accent/10"
+                : step.status === "error"
+                ? "border-destructive/50 bg-destructive/10"
+                : step.status === "running"
+                ? "border-primary/50 bg-primary/10"
+                : "border-border"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              {step.status === "running" && (
+                <Loader2 className="w-5 h-5 text-primary animate-spin" />
+              )}
+              {step.status === "done" && (
+                <CheckCircle2 className="w-5 h-5 text-accent" />
+              )}
+              {step.status === "error" && (
+                <AlertCircle className="w-5 h-5 text-destructive" />
+              )}
+              {step.status === "pending" && (
+                <div className="w-5 h-5 rounded-full border-2 border-muted-foreground" />
+              )}
+              <div className="flex-1">
+                <p className="font-medium">{step.label}</p>
+                {step.message && (
+                  <p className="text-sm text-muted-foreground">{step.message}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {error && (
+        <div className="mt-4 p-4 rounded-xl bg-destructive/10 border border-destructive/30">
+          <p className="text-sm text-destructive">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-2 text-sm text-destructive underline"
+          >
+            Try Again
+          </button>
+        </div>
+      )}
+
+      {status === "done" && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-6"
+        >
+          <button
+            onClick={onComplete}
+            className="w-full py-3 bg-accent hover:bg-accent-hover rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+          >
+            Continue
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </motion.div>
+      )}
+    </StepWrapper>
+  );
+}
+
 function StepAI({
   value,
   onChange,
@@ -330,50 +509,123 @@ function StepAI({
   value: string[];
   onChange: (v: string[]) => void;
 }) {
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<Record<string, boolean>>({});
+
   const providers = [
-    { id: "anthropic", name: "Anthropic", model: "Claude", logo: "🧠" },
-    { id: "openai", name: "OpenAI", model: "GPT-4", logo: "🤖" },
-    { id: "google", name: "Google", model: "Gemini", logo: "✨" },
-    { id: "ollama", name: "Ollama", model: "Local Models", logo: "🦙", free: true },
+    { id: "anthropic", name: "Anthropic", model: "Claude Code", logo: "🧠", installable: true },
+    { id: "openai", name: "OpenAI", model: "Codex CLI", logo: "🤖", installable: true },
+    { id: "google", name: "Google", model: "Gemini", logo: "✨", installable: false },
+    { id: "ollama", name: "Ollama", model: "Local Models", logo: "🦙", free: true, installable: false },
   ];
 
-  function toggle(id: string) {
+  async function toggle(id: string) {
+    const provider = providers.find((p) => p.id === id);
+    
     if (value.includes(id)) {
       onChange(value.filter((v) => v !== id));
-    } else {
-      onChange([...value, id]);
+      return;
     }
+
+    // If installable, install the CLI
+    if (provider?.installable && !installed[id]) {
+      setInstalling(id);
+      try {
+        const res = await fetch("/api/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "install-provider", provider: id }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setInstalled((prev) => ({ ...prev, [id]: true }));
+        }
+      } catch (e) {
+        console.error("Install failed:", e);
+      }
+      setInstalling(null);
+    }
+
+    onChange([...value, id]);
   }
 
   return (
     <StepWrapper
       title="Choose your AI providers"
-      description="Select one or more AI providers. You can always add more later."
+      description="Select providers. We'll install their CLI tools automatically."
     >
       <div className="grid grid-cols-2 gap-3">
         {providers.map((p) => (
           <button
             key={p.id}
             onClick={() => toggle(p.id)}
+            disabled={installing === p.id}
             className={`p-4 rounded-xl border-2 text-left transition-all ${
               value.includes(p.id)
                 ? "border-primary bg-primary/10"
                 : "border-border hover:border-primary/50"
-            }`}
+            } ${installing === p.id ? "opacity-70" : ""}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xl">{p.logo}</span>
-              {p.free && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
-                  Free
-                </span>
-              )}
+              <div className="flex gap-1">
+                {p.free && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                    Free
+                  </span>
+                )}
+                {installed[p.id] && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                    ✓ Installed
+                  </span>
+                )}
+              </div>
             </div>
-            <h3 className="font-semibold">{p.name}</h3>
+            <h3 className="font-semibold flex items-center gap-2">
+              {p.name}
+              {installing === p.id && (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              )}
+            </h3>
             <p className="text-sm text-muted-foreground">{p.model}</p>
+            {p.installable && !installed[p.id] && !value.includes(p.id) && (
+              <p className="text-xs text-primary mt-1">Click to install CLI</p>
+            )}
           </button>
         ))}
       </div>
+
+      {value.includes("anthropic") && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="mt-4 p-4 rounded-xl bg-primary/10 border border-primary/30"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <Terminal className="w-5 h-5 text-primary" />
+            <span className="font-medium">Claude Code CLI</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            You'll need to authenticate with: <code className="bg-background px-1 rounded">claude auth</code>
+          </p>
+        </motion.div>
+      )}
+
+      {value.includes("openai") && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="mt-4 p-4 rounded-xl bg-primary/10 border border-primary/30"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <Terminal className="w-5 h-5 text-primary" />
+            <span className="font-medium">OpenAI Codex CLI</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Set your API key: <code className="bg-background px-1 rounded">export OPENAI_API_KEY=sk-...</code>
+          </p>
+        </motion.div>
+      )}
 
       {value.includes("ollama") && (
         <motion.div
@@ -383,10 +635,10 @@ function StepAI({
         >
           <div className="flex items-center gap-2 mb-2">
             <Cpu className="w-5 h-5 text-accent" />
-            <span className="font-medium">Ollama Detected!</span>
+            <span className="font-medium">Ollama (Local)</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            We'll help you set up local models on the next screen.
+            Run models locally for free. Get it at <a href="https://ollama.ai" target="_blank" className="text-accent underline">ollama.ai</a>
           </p>
         </motion.div>
       )}
