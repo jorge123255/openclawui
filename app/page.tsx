@@ -114,22 +114,43 @@ export default function Home() {
       {/* Reset Config Banner */}
       <div className="mb-8 p-4 rounded-xl bg-secondary/50 border border-border flex items-center justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">
-            Want to start fresh?
+          <p className="text-sm font-medium">Configuration</p>
+          <p className="text-xs text-muted-foreground">
+            Restart wizard or fully reset OpenClaw
           </p>
         </div>
-        <button
-          onClick={() => {
-            if (confirm("This will reset all settings and restart the setup wizard. Continue?")) {
-              localStorage.removeItem("setupComplete");
-              localStorage.removeItem("config");
-              window.location.reload();
-            }
-          }}
-          className="text-sm px-4 py-2 rounded-lg bg-secondary hover:bg-secondary-hover transition-colors"
-        >
-          Restart Setup
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              if (confirm("Restart the setup wizard? Your OpenClaw config stays intact.")) {
+                localStorage.removeItem("setupComplete");
+                localStorage.removeItem("config");
+                window.location.reload();
+              }
+            }}
+            className="text-sm px-4 py-2 rounded-lg bg-secondary hover:bg-secondary-hover transition-colors"
+          >
+            Restart Wizard
+          </button>
+          <button
+            onClick={async () => {
+              if (confirm("⚠️ FULL RESET: This will wipe all OpenClaw settings, integrations, and restart setup. Are you sure?")) {
+                try {
+                  // Call API to run openclaw reset
+                  await fetch("/api/gateway/reset", { method: "POST" });
+                } catch (e) {
+                  console.log("Could not reach gateway for reset");
+                }
+                localStorage.removeItem("setupComplete");
+                localStorage.removeItem("config");
+                window.location.reload();
+              }
+            }}
+            className="text-sm px-4 py-2 rounded-lg bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
+          >
+            Full Reset
+          </button>
+        </div>
       </div>
 
       {/* Main Content Grid */}
@@ -227,23 +248,22 @@ function WelcomeScreen() {
           <ChevronRight className="w-5 h-5" />
         </Link>
 
-        <p className="mt-6 text-sm text-muted-foreground">
-          Already have a config?{" "}
-          <button className="text-primary hover:underline">Import</button>
-        </p>
-
-        <p className="mt-2 text-sm text-muted-foreground">
+        <div className="mt-8 flex flex-col gap-3">
+          <button className="text-sm text-primary hover:underline">
+            Already have a config? Import
+          </button>
+          
           <button 
             onClick={() => {
               localStorage.removeItem("setupComplete");
               localStorage.removeItem("config");
               window.location.reload();
             }}
-            className="text-muted-foreground hover:text-foreground underline"
+            className="text-sm text-muted-foreground hover:text-destructive transition-colors"
           >
-            Reset everything
+            🔄 Reset UI & Start Over
           </button>
-        </p>
+        </div>
       </motion.div>
     </main>
   );
