@@ -28,6 +28,7 @@ export default function SetupPage() {
     deployment: "local" as const,
     // AI Provider
     aiProvider: "" as "anthropic" | "openai" | "ollama" | "",
+    authMethod: "oauth" as "oauth" | "apikey",
     anthropicKey: "",
     openaiKey: "",
     ollamaUrl: "http://localhost:11434",
@@ -392,6 +393,8 @@ function StepAI({
   onChange: (updates: any) => void;
 }) {
   const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [authStatus, setAuthStatus] = useState<Record<string, "checking" | "authenticated" | "none">>({});
+  const [checkingAuth, setCheckingAuth] = useState(false);
 
   useEffect(() => {
     // Check if Ollama is running
@@ -400,12 +403,36 @@ function StepAI({
       .catch(() => setOllamaStatus("offline"));
   }, []);
 
+  // Check existing auth when provider is selected
+  async function checkAuth(provider: string) {
+    setCheckingAuth(true);
+    try {
+      const res = await fetch("/api/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-auth", provider }),
+      });
+      const data = await res.json();
+      setAuthStatus(prev => ({ ...prev, [provider]: data.authenticated ? "authenticated" : "none" }));
+    } catch {
+      setAuthStatus(prev => ({ ...prev, [provider]: "none" }));
+    }
+    setCheckingAuth(false);
+  }
+
+  useEffect(() => {
+    if (config.aiProvider && config.aiProvider !== "ollama") {
+      checkAuth(config.aiProvider);
+    }
+  }, [config.aiProvider]);
+
   const providers = [
     { 
       id: "anthropic", 
       name: "Anthropic", 
       model: "Claude (Recommended)", 
       logo: "🧠",
+      authCmd: "claude auth",
       keyPlaceholder: "sk-ant-...",
       keyLink: "https://console.anthropic.com/account/keys"
     },
@@ -414,6 +441,7 @@ function StepAI({
       name: "OpenAI", 
       model: "GPT-4 / GPT-5", 
       logo: "🤖",
+      authCmd: "codex auth",  
       keyPlaceholder: "sk-...",
       keyLink: "https://platform.openai.com/api-keys"
     },
@@ -429,7 +457,7 @@ function StepAI({
   return (
     <StepWrapper
       title="Choose your AI"
-      description="Pick a provider and enter your API key"
+      description="Pick a provider and authenticate"
     >
       <div className="space-y-3">
         {providers.map((p) => (
@@ -457,6 +485,11 @@ function StepAI({
                         ✓ Running
                       </span>
                     )}
+                    {authStatus[p.id] === "authenticated" && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                        ✓ Signed In
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground">{p.model}</p>
                 </div>
@@ -466,55 +499,121 @@ function StepAI({
               </div>
             </button>
 
-            {/* API Key Input */}
-            {config.aiProvider === p.id && p.id === "anthropic" && (
+            {/* Auth Options for Anthropic/OpenAI */}
+            {config.aiProvider === p.id && (p.id === "anthropic" || p.id === "openai") && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
-                className="mt-3 p-4 rounded-xl bg-card border border-border"
+                className="mt-3 space-y-3"
               >
-                <label className="block text-sm font-medium mb-2">Anthropic API Key</label>
-                <input
-                  type="password"
-                  placeholder={p.keyPlaceholder}
-                  value={config.anthropicKey}
-                  onChange={(e) => onChange({ anthropicKey: e.target.value })}
-                  className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
-                />
-                <a 
-                  href={p.keyLink} 
-                  target="_blank" 
-                  className="text-xs text-primary hover:underline mt-2 inline-block"
-                >
-                  Get your API key →
-                </a>
+                {/* Already authenticated */}
+                {authStatus[p.id] === "authenticated" && (
+                  <div className="p-4 rounded-xl bg-accent/10 border border-accent/30">
+                    <div className="flex items-center gap-2 text-accent">
+                      <CheckCircle2 className="w-5 h-5" />
+                      <span className="font-medium">Already signed in to {p.name}</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Your existing authentication will be used.
+                    </p>
+                  </div>
+                )}
+
+                {/* Auth method tabs */}
+                {authStatus[p.id] !== "authenticated" && (
+                  <>
+                    <div className="flex rounded-lg bg-secondary p-1">
+                      <button
+                        onClick={() => onChange({ authMethod: "oauth" })}
+                        className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                          config.authMethod === "oauth"
+                            ? "bg-card shadow text-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        🔐 Sign In (Recommended)
+                      </button>
+                      <button
+                        onClick={() => onChange({ authMethod: "apikey" })}
+                        className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+                          config.authMethod === "apikey"
+                            ? "bg-card shadow text-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        🔑 API Key
+                      </button>
+                    </div>
+
+                    {/* OAuth Tab */}
+                    {config.authMethod === "oauth" && (
+                      <div className="p-4 rounded-xl bg-card border border-border">
+                        <p className="text-sm text-muted-foreground mb-3">
+                          Run this command in your terminal to sign in:
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 p-3 rounded-lg bg-background font-mono text-sm select-all">
+                            {p.authCmd}
+                          </code>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(p.authCmd || "")}
+                            className="px-3 py-3 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
+                            title="Copy"
+                          >
+                            📋
+                          </button>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between">
+                          <p className="text-xs text-muted-foreground">
+                            After signing in, click to verify →
+                          </p>
+                          <button
+                            onClick={() => checkAuth(p.id)}
+                            disabled={checkingAuth}
+                            className="text-sm text-primary hover:underline flex items-center gap-1"
+                          >
+                            {checkingAuth ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              "Check Status"
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* API Key Tab */}
+                    {config.authMethod === "apikey" && (
+                      <div className="p-4 rounded-xl bg-card border border-border">
+                        <label className="block text-sm font-medium mb-2">
+                          {p.name} API Key
+                        </label>
+                        <input
+                          type="password"
+                          placeholder={p.keyPlaceholder}
+                          value={p.id === "anthropic" ? config.anthropicKey : config.openaiKey}
+                          onChange={(e) => onChange(
+                            p.id === "anthropic" 
+                              ? { anthropicKey: e.target.value }
+                              : { openaiKey: e.target.value }
+                          )}
+                          className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
+                        />
+                        <a 
+                          href={p.keyLink} 
+                          target="_blank" 
+                          className="text-xs text-primary hover:underline mt-2 inline-block"
+                        >
+                          Get your API key →
+                        </a>
+                      </div>
+                    )}
+                  </>
+                )}
               </motion.div>
             )}
 
-            {config.aiProvider === p.id && p.id === "openai" && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                className="mt-3 p-4 rounded-xl bg-card border border-border"
-              >
-                <label className="block text-sm font-medium mb-2">OpenAI API Key</label>
-                <input
-                  type="password"
-                  placeholder={p.keyPlaceholder}
-                  value={config.openaiKey}
-                  onChange={(e) => onChange({ openaiKey: e.target.value })}
-                  className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors font-mono text-sm"
-                />
-                <a 
-                  href={p.keyLink} 
-                  target="_blank" 
-                  className="text-xs text-primary hover:underline mt-2 inline-block"
-                >
-                  Get your API key →
-                </a>
-              </motion.div>
-            )}
-
+            {/* Ollama */}
             {config.aiProvider === p.id && p.id === "ollama" && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
@@ -710,13 +809,25 @@ function StepGateway({
       // Build config to save
       const configPatch: Record<string, any> = {};
 
-      // AI Provider
-      if (config.aiProvider === "anthropic" && config.anthropicKey) {
-        configPatch["env.vars.ANTHROPIC_API_KEY"] = config.anthropicKey;
+      // AI Provider - handle both OAuth and API key auth
+      if (config.aiProvider === "anthropic") {
         configPatch["agents.defaults.model.primary"] = "anthropic/claude-sonnet-4-20250514";
-      } else if (config.aiProvider === "openai" && config.openaiKey) {
-        configPatch["env.vars.OPENAI_API_KEY"] = config.openaiKey;
+        // Only set API key if using apikey method and key is provided
+        if (config.authMethod === "apikey" && config.anthropicKey) {
+          configPatch["models.providers.anthropic.apiKey"] = config.anthropicKey;
+          configPatch["models.providers.anthropic.baseUrl"] = "https://api.anthropic.com";
+          configPatch["models.providers.anthropic.api"] = "anthropic-messages";
+        }
+        // If OAuth, the existing claude auth will be used automatically
+      } else if (config.aiProvider === "openai") {
         configPatch["agents.defaults.model.primary"] = "openai/gpt-4o";
+        // Only set API key if using apikey method and key is provided
+        if (config.authMethod === "apikey" && config.openaiKey) {
+          configPatch["models.providers.openai.apiKey"] = config.openaiKey;
+          configPatch["models.providers.openai.baseUrl"] = "https://api.openai.com/v1";
+          configPatch["models.providers.openai.api"] = "openai-completions";
+        }
+        // If OAuth, the existing codex auth will be used automatically
       } else if (config.aiProvider === "ollama") {
         configPatch["agents.defaults.model.primary"] = "ollama/llama3.2";
       }
@@ -777,22 +888,30 @@ function StepGateway({
             <span className="text-muted-foreground">AI Provider</span>
             <span className="font-medium capitalize">{config.aiProvider || "Not set"}</span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Channel</span>
-            <span className="font-medium capitalize">{config.channel || "Not set"}</span>
-          </div>
           {config.aiProvider && !["ollama"].includes(config.aiProvider) && (
             <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Auth Method</span>
+              <span className="font-medium">
+                {config.authMethod === "oauth" ? "🔐 OAuth Sign In" : "🔑 API Key"}
+              </span>
+            </div>
+          )}
+          {config.aiProvider && !["ollama"].includes(config.aiProvider) && config.authMethod === "apikey" && (
+            <div className="flex items-center justify-between">
               <span className="text-muted-foreground">API Key</span>
-              <span className="font-medium text-accent">
+              <span className={`font-medium ${(config.anthropicKey || config.openaiKey) ? "text-accent" : "text-destructive"}`}>
                 {(config.anthropicKey || config.openaiKey) ? "✓ Provided" : "⚠ Missing"}
               </span>
             </div>
           )}
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Channel</span>
+            <span className="font-medium capitalize">{config.channel || "Not set"}</span>
+          </div>
           {config.channel === "telegram" && (
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Bot Token</span>
-              <span className="font-medium text-accent">
+              <span className={`font-medium ${config.telegramToken ? "text-accent" : "text-destructive"}`}>
                 {config.telegramToken ? "✓ Provided" : "⚠ Missing"}
               </span>
             </div>

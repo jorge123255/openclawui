@@ -19,6 +19,8 @@ export async function POST(request: Request) {
         return await installProvider(provider);
       case "check-provider":
         return await checkProvider(provider);
+      case "check-auth":
+        return await checkAuth(provider);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -163,5 +165,43 @@ async function checkProvider(provider: string) {
     });
   } catch {
     return NextResponse.json({ installed: false });
+  }
+}
+
+async function checkAuth(provider: string) {
+  // Check if user has authenticated with the provider
+  // For Claude: check ~/.claude.json or claude auth status
+  // For OpenAI/Codex: check ~/.codex/ or codex auth status
+  
+  try {
+    if (provider === "anthropic") {
+      // Try claude auth status or check for config file
+      try {
+        await execAsync("claude auth status", { timeout: 5000 });
+        return NextResponse.json({ authenticated: true, provider });
+      } catch {
+        // Check if claude config exists
+        const { stdout } = await execAsync("ls ~/.claude.json 2>/dev/null || ls ~/.config/claude/config.json 2>/dev/null", { timeout: 5000 });
+        if (stdout.trim()) {
+          return NextResponse.json({ authenticated: true, provider });
+        }
+      }
+    } else if (provider === "openai") {
+      // Check codex auth
+      try {
+        await execAsync("codex auth status", { timeout: 5000 });
+        return NextResponse.json({ authenticated: true, provider });
+      } catch {
+        // Check for OpenAI config/env
+        const { stdout } = await execAsync("ls ~/.codex/ 2>/dev/null", { timeout: 5000 });
+        if (stdout.trim()) {
+          return NextResponse.json({ authenticated: true, provider });
+        }
+      }
+    }
+    
+    return NextResponse.json({ authenticated: false, provider });
+  } catch {
+    return NextResponse.json({ authenticated: false, provider });
   }
 }
