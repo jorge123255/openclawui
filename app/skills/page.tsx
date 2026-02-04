@@ -190,11 +190,42 @@ export default function SkillsPage() {
     s.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const [clawHubResults, setClawHubResults] = useState<Skill[]>([]);
+  const [searchingClawHub, setSearchingClawHub] = useState(false);
+
+  // Search ClawHub when query changes (debounced)
+  useEffect(() => {
+    if (activeTab !== "store" || !searchQuery || searchQuery.length < 2) {
+      setClawHubResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchingClawHub(true);
+      try {
+        const res = await fetch("/api/skills", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "search", query: searchQuery }),
+        });
+        const data = await res.json();
+        if (data.success && data.skills) {
+          setClawHubResults(data.skills);
+        }
+      } catch {}
+      setSearchingClawHub(false);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, activeTab]);
+
   const filteredStoreSkills = searchQuery
-    ? storeCategories.flatMap(c => c.skills).filter(s =>
-        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.description?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+    ? clawHubResults.length > 0 
+      ? clawHubResults 
+      : storeCategories.flatMap(c => c.skills).filter(s =>
+          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.description?.toLowerCase().includes(searchQuery.toLowerCase())
+        )
     : [];
 
   const isInstalled = (slug: string) =>
@@ -367,9 +398,23 @@ export default function SkillsPage() {
             ) : searchQuery ? (
               /* Search results */
               <div>
-                <h3 className="text-lg font-semibold mb-4">
-                  {filteredStoreSkills.length} results for "{searchQuery}"
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">
+                    {searchingClawHub ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Searching ClawHub...
+                      </span>
+                    ) : (
+                      `${filteredStoreSkills.length} results for "${searchQuery}"`
+                    )}
+                  </h3>
+                  {clawHubResults.length > 0 && (
+                    <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
+                      via ClawHub
+                    </span>
+                  )}
+                </div>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredStoreSkills.slice(0, 30).map((skill) => (
                     <SkillCard

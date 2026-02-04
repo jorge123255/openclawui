@@ -22,6 +22,8 @@ export async function POST(request: Request) {
         return await listInstalledSkills();
       case "browse":
         return await browseSkills(query);
+      case "search":
+        return await searchClawHub(query);
       case "install":
         return await installSkill(name);
       case "uninstall":
@@ -210,6 +212,48 @@ async function browseSkills(query?: string) {
   }
 
   return NextResponse.json({ skills: filtered, success: true });
+}
+
+async function searchClawHub(query?: string) {
+  if (!query) {
+    return NextResponse.json({ skills: [], success: true, message: "Enter a search query" });
+  }
+
+  try {
+    // Use clawhub CLI to search
+    const { stdout } = await execAsync(`clawhub search "${query}" --json 2>/dev/null || clawhub search "${query}" 2>/dev/null`, {
+      timeout: 30000,
+    });
+
+    // Try to parse as JSON first
+    try {
+      const results = JSON.parse(stdout);
+      const skills = (Array.isArray(results) ? results : results.skills || []).map((s: any) => ({
+        name: s.name || s.slug,
+        slug: s.slug || s.name,
+        description: s.description || "",
+        author: s.author || s.publisher || "",
+        version: s.version || "",
+        downloads: s.downloads || 0,
+      }));
+      return NextResponse.json({ skills, success: true, source: "clawhub" });
+    } catch {
+      // Parse text output (name - description format)
+      const lines = stdout.trim().split("\n").filter(Boolean);
+      const skills = lines.map((line: string) => {
+        const match = line.match(/^([^\s-]+)\s*-?\s*(.*)$/);
+        if (match) {
+          return { name: match[1], slug: match[1], description: match[2] || "" };
+        }
+        return { name: line.trim(), slug: line.trim(), description: "" };
+      });
+      return NextResponse.json({ skills, success: true, source: "clawhub" });
+    }
+  } catch (e: any) {
+    // Fallback to local search in cached skills
+    console.error("ClawHub search failed:", e.message);
+    return await browseSkills(query);
+  }
 }
 
 async function installSkill(name: string) {
