@@ -25,6 +25,7 @@ import {
   CheckSquare,
   LayoutGrid,
 } from "lucide-react";
+import LiveActivity from "@/components/LiveActivity";
 
 interface GatewayStatus {
   connected: boolean;
@@ -427,6 +428,11 @@ export default function Home() {
           description="Email, Calendar, GitHub"
           color="red"
         />
+      </div>
+
+      {/* Live Activity Feed */}
+      <div className="mb-8">
+        <LiveActivity maxItems={5} />
       </div>
 
       {/* Reset Config Banner */}
