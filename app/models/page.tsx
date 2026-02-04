@@ -44,6 +44,7 @@ interface OllamaModel {
 export default function ModelsPage() {
   const [loading, setLoading] = useState(true);
   const [primaryModel, setPrimaryModel] = useState<string>("");
+  const [subagentModel, setSubagentModel] = useState<string>("");
   const [configuredModels, setConfiguredModels] = useState<Model[]>([]);
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
   const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
@@ -51,6 +52,7 @@ export default function ModelsPage() {
   const [saving, setSaving] = useState(false);
   const [pullModel, setPullModel] = useState("");
   const [pulling, setPulling] = useState(false);
+  const [activeTab, setActiveTab] = useState<"models" | "hierarchy">("models");
 
   useEffect(() => {
     loadConfig();
@@ -70,6 +72,10 @@ export default function ModelsPage() {
         // Get primary model
         const primary = data.config?.agents?.defaults?.model?.primary || "";
         setPrimaryModel(primary);
+        
+        // Get subagent model
+        const subagent = data.config?.agents?.defaults?.model?.subagent || "";
+        setSubagentModel(subagent);
         
         // Get Ollama URL
         const ollama = data.config?.models?.providers?.ollama;
@@ -229,6 +235,60 @@ export default function ModelsPage() {
         </button>
       </header>
 
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 border-b border-border pb-2">
+        <button
+          onClick={() => setActiveTab("models")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            activeTab === "models"
+              ? "bg-primary text-primary-foreground"
+              : "hover:bg-secondary"
+          }`}
+        >
+          <Cpu className="w-4 h-4" />
+          Models
+        </button>
+        <button
+          onClick={() => setActiveTab("hierarchy")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            activeTab === "hierarchy"
+              ? "bg-primary text-primary-foreground"
+              : "hover:bg-secondary"
+          }`}
+        >
+          <Zap className="w-4 h-4" />
+          Model Hierarchy
+        </button>
+      </div>
+
+      {activeTab === "hierarchy" ? (
+        <ModelHierarchy
+          primaryModel={primaryModel}
+          subagentModel={subagentModel}
+          configuredModels={configuredModels}
+          ollamaModels={ollamaModels}
+          onSetPrimary={setPrimary}
+          onSetSubagent={async (modelId) => {
+            setSaving(true);
+            try {
+              await fetch("/api/gateway", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action: "config-patch",
+                  config: { "agents.defaults.model.subagent": modelId },
+                }),
+              });
+              setSubagentModel(modelId);
+            } catch (e) {
+              console.error("Failed to set subagent model:", e);
+            }
+            setSaving(false);
+          }}
+          saving={saving}
+        />
+      ) : (
+        <>
       {/* Primary Model */}
       <div className="mb-8 p-6 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
         <div className="flex items-center gap-2 mb-4">
@@ -470,6 +530,155 @@ export default function ModelsPage() {
           </p>
         </div>
       </section>
+        </>
+      )}
     </main>
+  );
+}
+
+// Model Hierarchy Component
+function ModelHierarchy({
+  primaryModel,
+  subagentModel,
+  configuredModels,
+  ollamaModels,
+  onSetPrimary,
+  onSetSubagent,
+  saving,
+}: {
+  primaryModel: string;
+  subagentModel: string;
+  configuredModels: Model[];
+  ollamaModels: OllamaModel[];
+  onSetPrimary: (id: string) => void;
+  onSetSubagent: (id: string) => void;
+  saving: boolean;
+}) {
+  // Combine all available models
+  const allModels = [
+    ...configuredModels,
+    ...ollamaModels.map(m => ({
+      id: `ollama/${m.name}`,
+      name: m.name,
+      provider: "Ollama",
+    })),
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Explanation */}
+      <div className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="font-semibold mb-3 flex items-center gap-2">
+          <Zap className="w-5 h-5 text-primary" />
+          Model Delegation Strategy
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Configure which models handle different types of tasks. The primary model handles your main conversations, 
+          while subagents can use cheaper/faster models for background work.
+        </p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="p-3 rounded-lg bg-secondary/50">
+            <p className="font-medium mb-1">🧠 Primary Model</p>
+            <p className="text-muted-foreground">Complex reasoning, direct conversation, final decisions</p>
+          </div>
+          <div className="p-3 rounded-lg bg-secondary/50">
+            <p className="font-medium mb-1">⚡ Subagent Model</p>
+            <p className="text-muted-foreground">Background tasks, research, batch operations, retries</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Primary Model Selection */}
+      <div className="p-6 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              <Star className="w-5 h-5 text-primary" />
+              Primary Model
+            </h3>
+            <p className="text-sm text-muted-foreground">Your main AI for conversations</p>
+          </div>
+          {saving && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
+        </div>
+        
+        <select
+          value={primaryModel}
+          onChange={(e) => onSetPrimary(e.target.value)}
+          className="w-full px-4 py-3 bg-card rounded-xl border border-border focus:border-primary outline-none"
+        >
+          <option value="">Select primary model...</option>
+          {allModels.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name} ({model.provider})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Subagent Model Selection */}
+      <div className="p-6 rounded-xl bg-gradient-to-br from-accent/20 to-accent/5 border border-accent/30">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold flex items-center gap-2">
+              <Zap className="w-5 h-5 text-accent" />
+              Subagent Model
+            </h3>
+            <p className="text-sm text-muted-foreground">For background tasks & delegation</p>
+          </div>
+        </div>
+        
+        <select
+          value={subagentModel}
+          onChange={(e) => onSetSubagent(e.target.value)}
+          className="w-full px-4 py-3 bg-card rounded-xl border border-border focus:border-accent outline-none"
+        >
+          <option value="">Same as primary (no delegation)</option>
+          <option value="ollama/qwen3:8b">🦙 qwen3:8b (Ollama - Free, good for tools)</option>
+          <option value="ollama/llama3.2:3b">🦙 llama3.2:3b (Ollama - Fast, simple tasks)</option>
+          {allModels.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name} ({model.provider})
+            </option>
+          ))}
+        </select>
+        
+        <p className="text-xs text-muted-foreground mt-2">
+          💡 Tip: Use Ollama models for subagents - they&apos;re free and unlimited!
+        </p>
+      </div>
+
+      {/* Current Configuration Summary */}
+      <div className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="font-semibold mb-4">Current Configuration</h3>
+        <div className="space-y-3 text-sm">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
+            <span className="text-muted-foreground">Primary</span>
+            <span className="font-mono">{primaryModel || "Not set"}</span>
+          </div>
+          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
+            <span className="text-muted-foreground">Subagent</span>
+            <span className="font-mono">{subagentModel || "(uses primary)"}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Recommended Hierarchy */}
+      <div className="p-6 rounded-xl bg-secondary/30 border border-border">
+        <h3 className="font-semibold mb-3">💡 Recommended Setup</h3>
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p><strong className="text-foreground">For cost savings:</strong></p>
+          <ul className="list-disc list-inside ml-2 space-y-1">
+            <li>Primary: Claude Opus or GPT-4o (best quality)</li>
+            <li>Subagent: Ollama qwen3:8b (free, good tool use)</li>
+          </ul>
+          <p className="mt-3"><strong className="text-foreground">For speed:</strong></p>
+          <ul className="list-disc list-inside ml-2 space-y-1">
+            <li>Primary: Claude Sonnet or GPT-4o-mini</li>
+            <li>Subagent: Ollama llama3.2:3b (fastest)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
   );
 }
