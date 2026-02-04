@@ -117,94 +117,94 @@ async function parseSkillInfo(skillPath: string, name: string) {
   }
 }
 
-async function browseSkills(query?: string) {
-  // For now, return a curated list of popular skills
-  // In the future, this could fetch from clawdhub.com API
-  const popularSkills = [
-    {
-      name: "github",
-      description: "Interact with GitHub using the gh CLI. Issues, PRs, CI runs, and API queries.",
-      category: "automation",
-      homepage: "https://clawdhub.com/skills/github",
-    },
-    {
-      name: "weather",
-      description: "Get current weather and forecasts (no API key required).",
-      category: "cloud",
-    },
-    {
-      name: "imsg",
-      description: "iMessage/SMS CLI for listing chats, history, watch, and sending.",
-      category: "chat",
-    },
-    {
-      name: "gog",
-      description: "Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.",
-      category: "productivity",
-    },
-    {
-      name: "bird",
-      description: "X/Twitter CLI for reading, searching, posting, and engagement.",
-      category: "chat",
-    },
-    {
-      name: "coding-agent",
-      description: "Run Codex CLI, Claude Code, or other coding agents via background process.",
-      category: "ai",
-    },
-    {
-      name: "peekaboo",
-      description: "Capture and automate macOS UI with the Peekaboo CLI.",
-      category: "automation",
-    },
-    {
-      name: "video-frames",
-      description: "Extract frames or short clips from videos using ffmpeg.",
-      category: "media",
-    },
-    {
-      name: "openai-image-gen",
-      description: "Batch-generate images via OpenAI Images API with gallery output.",
-      category: "ai",
-    },
-    {
-      name: "sag",
-      description: "ElevenLabs text-to-speech with mac-style say UX.",
-      category: "media",
-    },
-    {
-      name: "things-mac",
-      description: "Manage Things 3 via the things CLI on macOS.",
-      category: "productivity",
-    },
-    {
-      name: "apple-reminders",
-      description: "Manage Apple Reminders via the remindctl CLI on macOS.",
-      category: "productivity",
-    },
-    {
-      name: "nano-pdf",
-      description: "Edit PDFs with natural-language instructions using the nano-pdf CLI.",
-      category: "automation",
-    },
-    {
-      name: "gemini",
-      description: "Gemini CLI for one-shot Q&A, summaries, and generation.",
-      category: "ai",
-    },
-    {
-      name: "mcporter",
-      description: "List, configure, auth, and call MCP servers/tools directly.",
-      category: "ai",
-    },
-  ];
+// Cache for GitHub skills list
+let skillsCache: any[] | null = null;
+let cacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-  let filtered = popularSkills;
+async function browseSkills(query?: string) {
+  // Fetch from GitHub OpenClaw repo
+  const now = Date.now();
+  
+  if (!skillsCache || now - cacheTime > CACHE_TTL) {
+    try {
+      // Get list of skill directories
+      const listRes = await fetch(
+        "https://api.github.com/repos/openclaw/openclaw/contents/skills",
+        { headers: { "User-Agent": "OpenClawUI" } }
+      );
+      
+      if (!listRes.ok) throw new Error("GitHub API error");
+      
+      const dirs = await listRes.json();
+      const skillDirs = dirs.filter((d: any) => d.type === "dir").map((d: any) => d.name);
+      
+      // Fetch SKILL.md for each (in parallel, limited batch)
+      const skills: any[] = [];
+      const batchSize = 10;
+      
+      for (let i = 0; i < skillDirs.length; i += batchSize) {
+        const batch = skillDirs.slice(i, i + batchSize);
+        const promises = batch.map(async (name: string) => {
+          try {
+            const mdRes = await fetch(
+              `https://raw.githubusercontent.com/openclaw/openclaw/main/skills/${name}/SKILL.md`,
+              { headers: { "User-Agent": "OpenClawUI" } }
+            );
+            
+            if (!mdRes.ok) return { name, description: `${name} skill` };
+            
+            const content = await mdRes.text();
+            
+            // Parse frontmatter
+            const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+            let description = "";
+            let homepage = "";
+            
+            if (frontmatterMatch) {
+              const fm = frontmatterMatch[1];
+              const descMatch = fm.match(/description:\s*(.+)/);
+              if (descMatch) description = descMatch[1].trim();
+              const homeMatch = fm.match(/homepage:\s*(.+)/);
+              if (homeMatch) homepage = homeMatch[1].trim();
+            }
+            
+            // Infer category from name/description
+            let category = "default";
+            const lower = (name + " " + description).toLowerCase();
+            if (lower.includes("ai") || lower.includes("model") || lower.includes("llm") || lower.includes("gpt") || lower.includes("claude")) category = "ai";
+            else if (lower.includes("browser") || lower.includes("web")) category = "browser";
+            else if (lower.includes("mail") || lower.includes("email") || lower.includes("gmail")) category = "email";
+            else if (lower.includes("calendar") || lower.includes("reminder") || lower.includes("todo") || lower.includes("things")) category = "productivity";
+            else if (lower.includes("message") || lower.includes("chat") || lower.includes("discord") || lower.includes("telegram") || lower.includes("slack")) category = "chat";
+            else if (lower.includes("image") || lower.includes("video") || lower.includes("audio") || lower.includes("media") || lower.includes("camera")) category = "media";
+            else if (lower.includes("github") || lower.includes("code") || lower.includes("git")) category = "automation";
+            
+            return { name, description: description || `${name} skill`, homepage, category };
+          } catch (e) {
+            return { name, description: `${name} skill` };
+          }
+        });
+        
+        const results = await Promise.all(promises);
+        skills.push(...results);
+      }
+      
+      skillsCache = skills;
+      cacheTime = now;
+    } catch (e) {
+      console.error("Failed to fetch from GitHub:", e);
+      // Fall back to empty list
+      if (!skillsCache) skillsCache = [];
+    }
+  }
+
+  let filtered = skillsCache || [];
   if (query) {
     const q = query.toLowerCase();
-    filtered = popularSkills.filter(
-      s => s.name.toLowerCase().includes(q) ||
-           s.description.toLowerCase().includes(q) ||
+    filtered = filtered.filter(
+      (s: any) => s.name.toLowerCase().includes(q) ||
+           s.description?.toLowerCase().includes(q) ||
            s.category?.toLowerCase().includes(q)
     );
   }
@@ -217,22 +217,59 @@ async function installSkill(name: string) {
     return NextResponse.json({ error: "Skill name required" }, { status: 400 });
   }
 
+  const targetDir = join(homedir(), "clawd", "skills", name);
+
   try {
-    // Try using clawdhub CLI
-    const { stdout, stderr } = await execAsync(`clawdhub install ${name}`, {
-      timeout: 60000,
-    });
+    // Method 1: Try clawdhub CLI
+    try {
+      const { stdout } = await execAsync(`clawdhub install ${name}`, {
+        timeout: 60000,
+      });
+      return NextResponse.json({
+        success: true,
+        message: `Installed ${name}`,
+        output: stdout,
+      });
+    } catch (e) {
+      // clawdhub failed, try git clone
+    }
+
+    // Method 2: Clone from OpenClaw GitHub repo
+    // First check if skill exists in repo
+    const checkRes = await fetch(
+      `https://api.github.com/repos/openclaw/openclaw/contents/skills/${name}`,
+      { headers: { "User-Agent": "OpenClawUI" } }
+    );
     
+    if (!checkRes.ok) {
+      return NextResponse.json({
+        success: false,
+        error: `Skill "${name}" not found in OpenClaw repository`,
+      });
+    }
+
+    // Create skills directory if needed
+    await execAsync(`mkdir -p "${join(homedir(), "clawd", "skills")}"`);
+
+    // Use sparse checkout to get just this skill
+    const tempDir = `/tmp/openclaw-skill-${Date.now()}`;
+    await execAsync(`
+      git clone --depth 1 --filter=blob:none --sparse \
+        https://github.com/openclaw/openclaw.git "${tempDir}" && \
+      cd "${tempDir}" && \
+      git sparse-checkout set "skills/${name}" && \
+      cp -r "skills/${name}" "${targetDir}" && \
+      rm -rf "${tempDir}"
+    `, { timeout: 120000 });
+
     return NextResponse.json({
       success: true,
-      message: `Installed ${name}`,
-      output: stdout,
+      message: `Installed ${name} to ${targetDir}`,
     });
   } catch (e: any) {
-    // If clawdhub fails, provide manual instructions
     return NextResponse.json({
       success: false,
-      error: `Failed to install via clawdhub CLI. Try manually:\n\nclawdhub install ${name}\n\nOr clone from GitHub.`,
+      error: `Failed to install: ${e.message}`,
     });
   }
 }
