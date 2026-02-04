@@ -3,6 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import MobileNav from "@/components/MobileNav";
+import CommandPalette from "@/components/CommandPalette";
+import KeyboardHint from "@/components/KeyboardHint";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -35,6 +37,8 @@ export default function RootLayout({
       <body className={`${inter.className} bg-background text-foreground min-h-screen pb-16 md:pb-0`}>
         {children}
         <MobileNav />
+        <CommandPalette />
+        <KeyboardHint />
         <Toaster
           position="bottom-right"
           toastOptions={{
