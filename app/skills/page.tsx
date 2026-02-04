@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
   Sparkles,
@@ -26,48 +26,91 @@ import {
   Calendar,
   Mail,
   Cloud,
+  Home,
+  ShoppingBag,
+  Grid,
+  List,
+  ChevronRight,
+  X,
 } from "lucide-react";
 
 interface Skill {
   name: string;
+  slug?: string;
   description: string;
   version?: string;
   homepage?: string;
-  installed: boolean;
+  url?: string;
+  author?: string;
+  installed?: boolean;
   category?: string;
-  icon?: string;
 }
 
-const CATEGORY_ICONS: Record<string, any> = {
-  "ai": Cpu,
-  "automation": Code,
-  "browser": Globe,
-  "calendar": Calendar,
-  "camera": Camera,
-  "chat": MessageSquare,
-  "cli": Terminal,
-  "cloud": Cloud,
-  "email": Mail,
-  "media": Music,
-  "default": Package,
+interface StoreCategory {
+  name: string;
+  id: string;
+  count: number;
+  skills: Skill[];
+}
+
+const CATEGORY_ICONS: Record<string, string> = {
+  "apple-apps--services": "🍎",
+  "smart-home--iot": "🏠",
+  "calendar--scheduling": "📅",
+  "communication": "💬",
+  "media--streaming": "🎵",
+  "notes--pkm": "📝",
+  "search--research": "🔍",
+  "ai--llms": "🤖",
+  "coding-agents--ides": "💻",
+  "web--frontend-development": "🌐",
+  "devops--cloud": "☁️",
+  "browser--automation": "🔄",
+  "cli-utilities": "⌨️",
+  "productivity--tasks": "✅",
+  "finance": "💰",
+  "health--fitness": "❤️",
+  "shopping--e-commerce": "🛒",
+  "security--passwords": "🔐",
+  "gaming": "🎮",
+  "pdf--documents": "📄",
+  "git--github": "🐙",
+  "image--video-generation": "🎨",
+  "speech--transcription": "🎤",
+  "transportation": "🚗",
+  "personal-development": "📚",
+  "marketing--sales": "📈",
+  "data--analytics": "📊",
+  "self-hosted--automation": "🖥️",
+  "ios--macos-development": "📱",
+  "moltbook": "📓",
+  "clawdbot-tools": "🛠️",
 };
 
 export default function SkillsPage() {
   const [loading, setLoading] = useState(true);
   const [installedSkills, setInstalledSkills] = useState<Skill[]>([]);
-  const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
+  const [storeCategories, setStoreCategories] = useState<StoreCategory[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"installed" | "browse">("installed");
+  const [activeTab, setActiveTab] = useState<"installed" | "store">("installed");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [installSuccess, setInstallSuccess] = useState<string | null>(null);
+  const [storeLoading, setStoreLoading] = useState(false);
 
   useEffect(() => {
-    loadSkills();
+    loadInstalledSkills();
   }, []);
 
-  async function loadSkills() {
+  useEffect(() => {
+    if (activeTab === "store" && storeCategories.length === 0) {
+      loadStoreSkills();
+    }
+  }, [activeTab]);
+
+  async function loadInstalledSkills() {
     setLoading(true);
     try {
-      // Load installed skills from API
       const res = await fetch("/api/skills", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -77,39 +120,42 @@ export default function SkillsPage() {
       if (data.skills) {
         setInstalledSkills(data.skills);
       }
-
-      // Load available skills from ClawdHub
-      const hubRes = await fetch("/api/skills", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "browse" }),
-      });
-      const hubData = await hubRes.json();
-      if (hubData.skills) {
-        setAvailableSkills(hubData.skills);
-      }
     } catch (e) {
       console.error("Failed to load skills:", e);
     }
     setLoading(false);
   }
 
-  const [installSuccess, setInstallSuccess] = useState<string | null>(null);
+  async function loadStoreSkills() {
+    setStoreLoading(true);
+    try {
+      const url = selectedCategory
+        ? `/api/skills/store?category=${selectedCategory}`
+        : "/api/skills/store";
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success) {
+        setStoreCategories(data.categories || []);
+      }
+    } catch (e) {
+      console.error("Failed to load store:", e);
+    }
+    setStoreLoading(false);
+  }
 
-  async function installSkill(name: string) {
-    setInstalling(name);
+  async function installSkill(slug: string) {
+    setInstalling(slug);
     setInstallSuccess(null);
     try {
       const res = await fetch("/api/skills", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "install", name }),
+        body: JSON.stringify({ action: "install", name: slug }),
       });
       const data = await res.json();
       if (data.success) {
-        setInstallSuccess(name);
-        await loadSkills();
-        // Auto-hide success message after 5 seconds
+        setInstallSuccess(slug);
+        await loadInstalledSkills();
         setTimeout(() => setInstallSuccess(null), 5000);
       } else {
         alert(`Failed to install: ${data.error}`);
@@ -122,7 +168,6 @@ export default function SkillsPage() {
 
   async function uninstallSkill(name: string) {
     if (!confirm(`Uninstall skill "${name}"?`)) return;
-    
     try {
       const res = await fetch("/api/skills", {
         method: "POST",
@@ -131,7 +176,7 @@ export default function SkillsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        await loadSkills();
+        await loadInstalledSkills();
       } else {
         alert(`Failed to uninstall: ${data.error}`);
       }
@@ -145,215 +190,234 @@ export default function SkillsPage() {
     s.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredAvailable = availableSkills.filter(s =>
-    !installedSkills.some(i => i.name === s.name) &&
-    (s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     s.description?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredStoreSkills = searchQuery
+    ? storeCategories.flatMap(c => c.skills).filter(s =>
+        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.description?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : [];
+
+  const isInstalled = (slug: string) =>
+    installedSkills.some(s => s.name === slug || s.name.includes(slug));
+
+  const totalStoreSkills = storeCategories.reduce((acc, c) => acc + c.count, 0);
 
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center">
+      <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen p-8">
+    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
       {/* Header */}
-      <header className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
-          <Link
-            href="/"
-            className="p-2 rounded-lg hover:bg-secondary transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </Link>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center">
-              <Sparkles className="w-7 h-7 text-yellow-400" />
+      <header className="border-b border-white/10 bg-black/20 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="p-2 hover:bg-white/10 rounded-lg transition-colors">
+                <ChevronLeft className="w-5 h-5" />
+              </Link>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-yellow-500/20 rounded-lg">
+                  <Sparkles className="w-6 h-6 text-yellow-400" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-semibold">Skills</h1>
+                  <p className="text-sm text-gray-400">
+                    {installedSkills.length} installed • {totalStoreSkills}+ in store
+                  </p>
+                </div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold">Skills</h1>
-              <p className="text-sm text-muted-foreground">
-                {installedSkills.length} installed
-              </p>
-            </div>
+            <button
+              onClick={() => activeTab === "installed" ? loadInstalledSkills() : loadStoreSkills()}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            >
+              <RefreshCw className={`w-5 h-5 ${loading || storeLoading ? "animate-spin" : ""}`} />
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => loadSkills()}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </button>
-          <a
-            href="https://clawdhub.com"
-            target="_blank"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover transition-colors"
-          >
-            <Globe className="w-4 h-4" />
-            ClawdHub
-          </a>
         </div>
       </header>
 
-      {/* Success Banner */}
-      {installSuccess && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0 }}
-          className="mb-6 p-4 rounded-xl bg-accent/20 border border-accent/30 flex items-center gap-3"
-        >
-          <Check className="w-5 h-5 text-accent" />
-          <div className="flex-1">
-            <p className="font-medium text-accent">Installed "{installSuccess}" successfully!</p>
-            <p className="text-sm text-muted-foreground">✓ No restart required — skill is ready to use immediately</p>
-          </div>
-          <button
-            onClick={() => setInstallSuccess(null)}
-            className="p-1 rounded hover:bg-accent/20 transition-colors"
-          >
-            ✕
-          </button>
-        </motion.div>
-      )}
-
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search skills..."
-          className="w-full pl-12 pr-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none"
-        />
-      </div>
-
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-border pb-2">
-        <button
-          onClick={() => setActiveTab("installed")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-            activeTab === "installed"
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-secondary"
-          }`}
-        >
-          <Folder className="w-4 h-4" />
-          Installed ({filteredInstalled.length})
-        </button>
-        <button
-          onClick={() => setActiveTab("browse")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-            activeTab === "browse"
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-secondary"
-          }`}
-        >
-          <Globe className="w-4 h-4" />
-          Browse ClawdHub
-        </button>
-      </div>
+      <div className="max-w-6xl mx-auto px-4 py-4">
+        <div className="flex items-center gap-4 mb-4">
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setActiveTab("installed"); setSelectedCategory(null); }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                activeTab === "installed" ? "bg-white/10 text-white" : "text-gray-400 hover:text-white"
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              Installed
+            </button>
+            <button
+              onClick={() => setActiveTab("store")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                activeTab === "store" ? "bg-white/10 text-white" : "text-gray-400 hover:text-white"
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              Store
+            </button>
+          </div>
 
-      {/* Content */}
-      {activeTab === "installed" ? (
-        <div className="space-y-4">
-          {filteredInstalled.length === 0 ? (
-            <div className="p-12 rounded-xl bg-secondary/50 text-center">
-              <Package className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-lg font-medium mb-2">No skills installed</p>
-              <p className="text-sm text-muted-foreground mb-4">
-                Browse ClawdHub to find and install skills
-              </p>
+          {/* Search */}
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={activeTab === "installed" ? "Search installed..." : "Search 1700+ skills..."}
+              className="w-full pl-10 pr-4 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-yellow-500/50"
+            />
+            {searchQuery && (
               <button
-                onClick={() => setActiveTab("browse")}
-                className="px-4 py-2 bg-primary rounded-lg hover:bg-primary-hover transition-colors"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2"
               >
-                Browse Skills
+                <X className="w-4 h-4 text-gray-500" />
               </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredInstalled.map((skill) => (
-                <SkillCard
-                  key={skill.name}
-                  skill={skill}
-                  onUninstall={() => uninstallSkill(skill.name)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredAvailable.length === 0 ? (
-            <div className="p-12 rounded-xl bg-secondary/50 text-center">
-              <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-lg font-medium mb-2">No skills found</p>
-              <p className="text-sm text-muted-foreground">
-                {searchQuery ? "Try a different search term" : "Check back later for new skills"}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredAvailable.map((skill) => (
-                <SkillCard
-                  key={skill.name}
-                  skill={skill}
-                  onInstall={() => installSkill(skill.name)}
-                  installing={installing === skill.name}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Featured Categories */}
-      {activeTab === "browse" && !searchQuery && (
-        <div className="mt-8">
-          <h2 className="text-lg font-semibold mb-4">Categories</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {[
-              { name: "AI & Models", icon: Cpu, query: "ai" },
-              { name: "Automation", icon: Code, query: "automation" },
-              { name: "Browser", icon: Globe, query: "browser" },
-              { name: "Communication", icon: MessageSquare, query: "chat" },
-              { name: "Media", icon: Camera, query: "media" },
-              { name: "Productivity", icon: Calendar, query: "productivity" },
-            ].map((cat) => (
-              <button
-                key={cat.name}
-                onClick={() => setSearchQuery(cat.query)}
-                className="p-4 rounded-xl bg-card hover:bg-card/80 border border-border text-center transition-colors"
-              >
-                <cat.icon className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-                <p className="text-sm font-medium">{cat.name}</p>
-              </button>
-            ))}
+            )}
           </div>
         </div>
-      )}
 
-      {/* Help */}
-      <div className="mt-8 p-6 rounded-xl bg-card border border-border">
-        <h3 className="font-semibold mb-3">Installing Skills Manually</h3>
-        <p className="text-sm text-muted-foreground mb-3">
-          You can also install skills via the command line:
-        </p>
-        <code className="block p-3 rounded-lg bg-secondary text-sm font-mono">
-          clawdhub install &lt;skill-name&gt;
-        </code>
-        <p className="text-xs text-muted-foreground mt-3">
-          Skills are installed to your workspace&apos;s <code className="bg-secondary px-1 rounded">skills/</code> directory.
-        </p>
+        {/* Success Banner */}
+        <AnimatePresence>
+          {installSuccess && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mb-4 p-3 rounded-lg bg-green-500/20 border border-green-500/30 flex items-center gap-2"
+            >
+              <Check className="w-5 h-5 text-green-400" />
+              <span>Successfully installed <strong>{installSuccess}</strong>!</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Installed Tab */}
+        {activeTab === "installed" && (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredInstalled.length === 0 ? (
+              <div className="col-span-full text-center py-12 text-gray-500">
+                <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No skills installed yet</p>
+                <button
+                  onClick={() => setActiveTab("store")}
+                  className="mt-4 text-yellow-400 hover:underline"
+                >
+                  Browse the store →
+                </button>
+              </div>
+            ) : (
+              filteredInstalled.map((skill) => (
+                <motion.div
+                  key={skill.name}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="p-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <h3 className="font-semibold">{skill.name}</h3>
+                    <button
+                      onClick={() => uninstallSkill(skill.name)}
+                      className="p-1.5 hover:bg-red-500/20 rounded-lg text-gray-500 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <p className="text-sm text-gray-400 line-clamp-2">{skill.description}</p>
+                  {skill.version && (
+                    <div className="mt-2 text-xs text-gray-500">v{skill.version}</div>
+                  )}
+                </motion.div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Store Tab */}
+        {activeTab === "store" && (
+          <>
+            {/* Category breadcrumb */}
+            {selectedCategory && (
+              <div className="flex items-center gap-2 mb-4 text-sm">
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className="text-yellow-400 hover:underline"
+                >
+                  All Categories
+                </button>
+                <ChevronRight className="w-4 h-4 text-gray-500" />
+                <span>{storeCategories.find(c => c.id === selectedCategory)?.name}</span>
+              </div>
+            )}
+
+            {storeLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
+              </div>
+            ) : searchQuery ? (
+              /* Search results */
+              <div>
+                <h3 className="text-lg font-semibold mb-4">
+                  {filteredStoreSkills.length} results for "{searchQuery}"
+                </h3>
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredStoreSkills.slice(0, 30).map((skill) => (
+                    <SkillCard
+                      key={skill.slug}
+                      skill={skill}
+                      installed={isInstalled(skill.slug || skill.name)}
+                      installing={installing === skill.slug}
+                      onInstall={() => installSkill(skill.slug || skill.name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : selectedCategory ? (
+              /* Skills in category */
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {storeCategories
+                  .find(c => c.id === selectedCategory)
+                  ?.skills.map((skill) => (
+                    <SkillCard
+                      key={skill.slug}
+                      skill={skill}
+                      installed={isInstalled(skill.slug || skill.name)}
+                      installing={installing === skill.slug}
+                      onInstall={() => installSkill(skill.slug || skill.name)}
+                    />
+                  ))}
+              </div>
+            ) : (
+              /* Category grid */
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {storeCategories.map((cat) => (
+                  <motion.button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    whileHover={{ scale: 1.02 }}
+                    className="p-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-yellow-500/30 transition-all text-left group"
+                  >
+                    <div className="text-2xl mb-2">
+                      {CATEGORY_ICONS[cat.id] || "📦"}
+                    </div>
+                    <h3 className="font-semibold truncate">{cat.name}</h3>
+                    <p className="text-sm text-gray-400">{cat.count} skills</p>
+                  </motion.button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </main>
   );
@@ -361,83 +425,65 @@ export default function SkillsPage() {
 
 function SkillCard({
   skill,
-  onInstall,
-  onUninstall,
+  installed,
   installing,
+  onInstall,
 }: {
   skill: Skill;
-  onInstall?: () => void;
-  onUninstall?: () => void;
-  installing?: boolean;
+  installed: boolean;
+  installing: boolean;
+  onInstall: () => void;
 }) {
-  const IconComponent = CATEGORY_ICONS[skill.category || "default"] || Package;
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="p-5 rounded-xl bg-card border border-border hover:border-primary/50 transition-all"
+      className="p-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
     >
-      <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-          <IconComponent className="w-5 h-5 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold truncate">{skill.name}</h3>
-            {skill.installed && (
-              <Check className="w-4 h-4 text-accent flex-shrink-0" />
-            )}
-          </div>
-          {skill.version && (
-            <p className="text-xs text-muted-foreground">v{skill.version}</p>
+      <div className="flex items-start justify-between mb-2">
+        <div>
+          <h3 className="font-semibold">{skill.name}</h3>
+          {skill.author && (
+            <div className="text-xs text-gray-500">by {skill.author}</div>
           )}
         </div>
-      </div>
-
-      <p className="text-sm text-muted-foreground mt-3 line-clamp-2">
-        {skill.description || "No description available"}
-      </p>
-
-      <div className="flex items-center gap-2 mt-4">
-        {skill.homepage && (
+        {skill.url && (
           <a
-            href={skill.homepage}
+            href={skill.url}
             target="_blank"
-            className="p-2 rounded-lg hover:bg-secondary transition-colors"
-            title="View docs"
+            rel="noopener noreferrer"
+            className="p-1.5 hover:bg-white/10 rounded-lg text-gray-500 hover:text-white transition-colors"
           >
             <ExternalLink className="w-4 h-4" />
           </a>
         )}
-        
-        <div className="flex-1" />
-
-        {onUninstall && (
-          <button
-            onClick={onUninstall}
-            className="p-2 rounded-lg hover:bg-destructive/20 text-destructive transition-colors"
-            title="Uninstall"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        )}
-
-        {onInstall && (
-          <button
-            onClick={onInstall}
-            disabled={installing}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary hover:bg-primary-hover disabled:opacity-50 transition-colors text-sm font-medium"
-          >
-            {installing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Download className="w-4 h-4" />
-            )}
-            Install
-          </button>
-        )}
       </div>
+      <p className="text-sm text-gray-400 line-clamp-2 mb-3">
+        {skill.description || "No description"}
+      </p>
+      <button
+        onClick={onInstall}
+        disabled={installed || installing}
+        className={`w-full py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+          installed
+            ? "bg-green-500/20 text-green-400 cursor-default"
+            : "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+        }`}
+      >
+        {installing ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : installed ? (
+          <>
+            <Check className="w-4 h-4" />
+            Installed
+          </>
+        ) : (
+          <>
+            <Download className="w-4 h-4" />
+            Install
+          </>
+        )}
+      </button>
     </motion.div>
   );
 }
