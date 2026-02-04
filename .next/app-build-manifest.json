@@ -1,20 +1,15 @@
 {
   "pages": {
-    "/page": [
+    "/setup/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/page.js"
+      "static/chunks/app/setup/page.js"
     ],
     "/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/css/css-app_globals_css-node_modules_next_font_google_target_css.css",
       "static/chunks/app/layout.js"
-    ],
-    "/setup/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/setup/page.js"
     ]
   }
 }
