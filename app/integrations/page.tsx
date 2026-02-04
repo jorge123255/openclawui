@@ -37,6 +37,68 @@ interface Integration {
   docsUrl?: string;
 }
 
+interface ScanResult {
+  id: string;
+  name: string;
+  found: boolean;
+  url: string;
+  configKey: string;
+}
+
+interface WizardStep {
+  service: string;
+  name: string;
+  fields: { key: string; label: string; type: string; placeholder: string; required?: boolean }[];
+}
+
+const WIZARD_CONFIGS: Record<string, WizardStep> = {
+  ollama: {
+    service: "ollama",
+    name: "Ollama",
+    fields: [
+      { key: "models.providers.ollama.baseUrl", label: "Ollama URL", type: "url", placeholder: "http://localhost:11434", required: true },
+    ],
+  },
+  n8n: {
+    service: "n8n",
+    name: "N8N",
+    fields: [
+      { key: "env.N8N_BASE_URL", label: "N8N URL", type: "url", placeholder: "http://localhost:5678", required: true },
+      { key: "env.N8N_API_KEY", label: "API Key", type: "password", placeholder: "Your N8N API key", required: true },
+    ],
+  },
+  elevenlabs: {
+    service: "elevenlabs",
+    name: "ElevenLabs",
+    fields: [
+      { key: "env.ELEVENLABS_API_KEY", label: "API Key", type: "password", placeholder: "sk_...", required: true },
+      { key: "env.ELEVENLABS_VOICE_ID", label: "Voice ID (optional)", type: "text", placeholder: "Voice ID for TTS" },
+    ],
+  },
+  "unifi-protect": {
+    service: "unifi-protect",
+    name: "UniFi Protect",
+    fields: [
+      { key: "env.UNIFI_PROTECT_HOST", label: "Protect URL", type: "url", placeholder: "https://192.168.1.1", required: true },
+      { key: "env.UNIFI_PROTECT_API_KEY", label: "API Key", type: "password", placeholder: "Your API key", required: true },
+    ],
+  },
+  "browser-use": {
+    service: "browser-use",
+    name: "Browser Use",
+    fields: [
+      { key: "skills.entries.browser-use.apiKey", label: "API Key", type: "password", placeholder: "bu_...", required: true },
+    ],
+  },
+  mcp: {
+    service: "mcp",
+    name: "MCP Tools Server",
+    fields: [
+      { key: "env.MCP_SERVER_URL", label: "Server URL", type: "url", placeholder: "http://localhost:3000", required: true },
+    ],
+  },
+};
+
 export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<any>({});
@@ -44,6 +106,14 @@ export default function IntegrationsPage() {
   const [n8nWorkflows, setN8nWorkflows] = useState<any[]>([]);
   const [mcpTools, setMcpTools] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<"services" | "n8n" | "mcp">("services");
+  
+  // Scan & Wizard state
+  const [scanning, setScanning] = useState(false);
+  const [scanResults, setScanResults] = useState<ScanResult[]>([]);
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardService, setWizardService] = useState<string | null>(null);
+  const [wizardValues, setWizardValues] = useState<Record<string, string>>({});
+  const [wizardSaving, setWizardSaving] = useState(false);
 
   useEffect(() => {
     loadIntegrations();
@@ -75,6 +145,67 @@ export default function IntegrationsPage() {
     await loadMcpTools();
     
     setLoading(false);
+  }
+
+  async function scanForServices() {
+    setScanning(true);
+    setScanResults([]);
+    
+    try {
+      const res = await fetch("/api/integrations/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "scan" }),
+      });
+      const data = await res.json();
+      if (data.services) {
+        setScanResults(data.services.filter((s: ScanResult) => s.found));
+      }
+    } catch (e) {
+      console.error("Scan failed:", e);
+    }
+    
+    setScanning(false);
+  }
+
+  function openWizard(serviceId: string, prefillUrl?: string) {
+    setWizardService(serviceId);
+    const wizard = WIZARD_CONFIGS[serviceId];
+    if (wizard && prefillUrl) {
+      const urlField = wizard.fields.find(f => f.type === "url");
+      if (urlField) {
+        setWizardValues({ [urlField.key]: prefillUrl });
+      }
+    } else {
+      setWizardValues({});
+    }
+    setShowWizard(true);
+  }
+
+  async function saveWizard() {
+    if (!wizardService) return;
+    
+    setWizardSaving(true);
+    try {
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config-patch", config: wizardValues }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        setShowWizard(false);
+        setWizardService(null);
+        setWizardValues({});
+        await loadIntegrations(); // Refresh
+      } else {
+        alert(`Failed to save: ${data.error}`);
+      }
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    }
+    setWizardSaving(false);
   }
 
   function buildIntegrationsList(cfg: any) {
@@ -246,14 +377,123 @@ export default function IntegrationsPage() {
           </div>
         </div>
 
-        <button
-          onClick={() => loadIntegrations()}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={scanForServices}
+            disabled={scanning}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover transition-colors"
+          >
+            {scanning ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Zap className="w-4 h-4" />
+            )}
+            Auto-Detect
+          </button>
+          <button
+            onClick={() => loadIntegrations()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
       </header>
+
+      {/* Scan Results Banner */}
+      {scanResults.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 p-4 rounded-xl bg-accent/20 border border-accent/30"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Check className="w-5 h-5 text-accent" />
+            <span className="font-medium">Found {scanResults.length} services on your network!</span>
+            <button
+              onClick={() => setScanResults([])}
+              className="ml-auto text-muted-foreground hover:text-foreground"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {scanResults.map((result) => (
+              <button
+                key={result.id}
+                onClick={() => openWizard(result.id, result.url)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-card hover:bg-card/80 border border-border transition-colors text-sm"
+              >
+                <span className="font-medium">{result.name}</span>
+                <span className="text-muted-foreground">{result.url}</span>
+                <Plus className="w-4 h-4 text-accent" />
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Wizard Modal */}
+      {showWizard && wizardService && WIZARD_CONFIGS[wizardService] && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-card rounded-2xl border border-border w-full max-w-md p-6"
+          >
+            <h2 className="text-xl font-bold mb-2">
+              Connect {WIZARD_CONFIGS[wizardService].name}
+            </h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              Enter your connection details below
+            </p>
+
+            <div className="space-y-4">
+              {WIZARD_CONFIGS[wizardService].fields.map((field) => (
+                <div key={field.key}>
+                  <label className="block text-sm font-medium mb-2">
+                    {field.label}
+                    {field.required && <span className="text-destructive ml-1">*</span>}
+                  </label>
+                  <input
+                    type={field.type === "password" ? "password" : "text"}
+                    value={wizardValues[field.key] || ""}
+                    onChange={(e) => setWizardValues({ ...wizardValues, [field.key]: e.target.value })}
+                    placeholder={field.placeholder}
+                    className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowWizard(false);
+                  setWizardService(null);
+                }}
+                className="flex-1 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveWizard}
+                disabled={wizardSaving}
+                className="flex-1 py-2 rounded-lg bg-primary hover:bg-primary-hover font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                {wizardSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Connect
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6 border-b border-border pb-2">
@@ -284,14 +524,23 @@ export default function IntegrationsPage() {
           ))}
           
           {/* Add New */}
-          <Link
-            href="/settings"
-            className="p-6 rounded-xl border-2 border-dashed border-border hover:border-primary/50 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-all"
-          >
-            <Plus className="w-8 h-8" />
-            <span className="font-medium">Add Integration</span>
-            <span className="text-sm">Configure in Settings</span>
-          </Link>
+          <div className="p-6 rounded-xl border-2 border-dashed border-border">
+            <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground mb-4">
+              <Plus className="w-8 h-8" />
+              <span className="font-medium text-foreground">Add Integration</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(WIZARD_CONFIGS).map(([id, config]) => (
+                <button
+                  key={id}
+                  onClick={() => openWizard(id)}
+                  className="px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-sm transition-colors"
+                >
+                  {config.name}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
