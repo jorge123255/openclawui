@@ -537,6 +537,20 @@ export default function ModelsPage() {
 }
 
 // Model Hierarchy Component
+interface ModelSlot {
+  role: string;
+  model: string;
+  description: string;
+}
+
+const DEFAULT_ROLES = [
+  { role: "primary", label: "🧠 Primary", description: "Main conversations, complex reasoning", color: "primary" },
+  { role: "coding", label: "💻 Coding", description: "Code generation, debugging, refactoring", color: "blue" },
+  { role: "research", label: "🔍 Research", description: "Web search, document analysis, summaries", color: "green" },
+  { role: "vision", label: "👁️ Vision", description: "Image analysis, screenshots, visual tasks", color: "purple" },
+  { role: "fast", label: "⚡ Fast", description: "Quick tasks, retries, batch operations", color: "yellow" },
+];
+
 function ModelHierarchy({
   primaryModel,
   subagentModel,
@@ -554,6 +568,70 @@ function ModelHierarchy({
   onSetSubagent: (id: string) => void;
   saving: boolean;
 }) {
+  const [slots, setSlots] = useState<ModelSlot[]>([]);
+  const [savingSlots, setSavingSlots] = useState(false);
+
+  // Load slots from config on mount
+  useEffect(() => {
+    loadSlots();
+  }, []);
+
+  async function loadSlots() {
+    try {
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config-get" }),
+      });
+      const data = await res.json();
+      const hierarchy = data.config?.agents?.defaults?.model?.hierarchy || [];
+      if (hierarchy.length > 0) {
+        setSlots(hierarchy);
+      }
+    } catch (e) {
+      console.error("Failed to load slots:", e);
+    }
+  }
+
+  async function saveSlots(newSlots: ModelSlot[]) {
+    setSavingSlots(true);
+    try {
+      await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "config-patch",
+          config: { "agents.defaults.model.hierarchy": newSlots },
+        }),
+      });
+      setSlots(newSlots);
+    } catch (e) {
+      console.error("Failed to save slots:", e);
+    }
+    setSavingSlots(false);
+  }
+
+  function addSlot(role: string) {
+    const roleInfo = DEFAULT_ROLES.find(r => r.role === role);
+    const newSlot: ModelSlot = {
+      role,
+      model: "",
+      description: roleInfo?.description || "",
+    };
+    saveSlots([...slots, newSlot]);
+  }
+
+  function updateSlot(index: number, model: string) {
+    const newSlots = [...slots];
+    newSlots[index].model = model;
+    saveSlots(newSlots);
+  }
+
+  function removeSlot(index: number) {
+    const newSlots = slots.filter((_, i) => i !== index);
+    saveSlots(newSlots);
+  }
+
   // Combine all available models
   const allModels = [
     ...configuredModels,
@@ -564,40 +642,32 @@ function ModelHierarchy({
     })),
   ];
 
+  const usedRoles = slots.map(s => s.role);
+  const availableRoles = DEFAULT_ROLES.filter(r => !usedRoles.includes(r.role) && r.role !== "primary");
+
   return (
     <div className="space-y-6">
       {/* Explanation */}
       <div className="p-6 rounded-xl bg-card border border-border">
         <h3 className="font-semibold mb-3 flex items-center gap-2">
           <Zap className="w-5 h-5 text-primary" />
-          Model Delegation Strategy
+          Model Hierarchy
         </h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Configure which models handle different types of tasks. The primary model handles your main conversations, 
-          while subagents can use cheaper/faster models for background work.
+        <p className="text-sm text-muted-foreground">
+          Assign different models to different roles. The system will automatically pick the right model based on the task type.
+          Add as many specialized models as you need!
         </p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div className="p-3 rounded-lg bg-secondary/50">
-            <p className="font-medium mb-1">🧠 Primary Model</p>
-            <p className="text-muted-foreground">Complex reasoning, direct conversation, final decisions</p>
-          </div>
-          <div className="p-3 rounded-lg bg-secondary/50">
-            <p className="font-medium mb-1">⚡ Subagent Model</p>
-            <p className="text-muted-foreground">Background tasks, research, batch operations, retries</p>
-          </div>
-        </div>
       </div>
 
-      {/* Primary Model Selection */}
+      {/* Primary Model - Always shown */}
       <div className="p-6 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-semibold flex items-center gap-2">
               <Star className="w-5 h-5 text-primary" />
-              Primary Model
+              🧠 Primary Model
             </h3>
-            <p className="text-sm text-muted-foreground">Your main AI for conversations</p>
+            <p className="text-sm text-muted-foreground">Main conversations, complex reasoning, final decisions</p>
           </div>
           {saving && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
         </div>
@@ -616,67 +686,154 @@ function ModelHierarchy({
         </select>
       </div>
 
-      {/* Subagent Model Selection */}
-      <div className="p-6 rounded-xl bg-gradient-to-br from-accent/20 to-accent/5 border border-accent/30">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-semibold flex items-center gap-2">
-              <Zap className="w-5 h-5 text-accent" />
-              Subagent Model
-            </h3>
-            <p className="text-sm text-muted-foreground">For background tasks & delegation</p>
+      {/* Dynamic Model Slots */}
+      {slots.map((slot, index) => {
+        const roleInfo = DEFAULT_ROLES.find(r => r.role === slot.role);
+        return (
+          <motion.div
+            key={`${slot.role}-${index}`}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 rounded-xl bg-card border border-border"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-semibold">{roleInfo?.label || slot.role}</h3>
+                <p className="text-sm text-muted-foreground">{slot.description || roleInfo?.description}</p>
+              </div>
+              <button
+                onClick={() => removeSlot(index)}
+                className="p-2 rounded-lg hover:bg-destructive/20 text-destructive transition-colors"
+                title="Remove"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <select
+              value={slot.model}
+              onChange={(e) => updateSlot(index, e.target.value)}
+              className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none"
+            >
+              <option value="">Use primary model</option>
+              {allModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.provider})
+                </option>
+              ))}
+            </select>
+          </motion.div>
+        );
+      })}
+
+      {/* Add New Slot */}
+      {availableRoles.length > 0 && (
+        <div className="p-6 rounded-xl border-2 border-dashed border-border">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            Add Model Role
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {availableRoles.map((role) => (
+              <button
+                key={role.role}
+                onClick={() => addSlot(role.role)}
+                disabled={savingSlots}
+                className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors text-sm"
+              >
+                {role.label}
+              </button>
+            ))}
           </div>
         </div>
-        
-        <select
-          value={subagentModel}
-          onChange={(e) => onSetSubagent(e.target.value)}
-          className="w-full px-4 py-3 bg-card rounded-xl border border-border focus:border-accent outline-none"
-        >
-          <option value="">Same as primary (no delegation)</option>
-          <option value="ollama/qwen3:8b">🦙 qwen3:8b (Ollama - Free, good for tools)</option>
-          <option value="ollama/llama3.2:3b">🦙 llama3.2:3b (Ollama - Fast, simple tasks)</option>
-          {allModels.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name} ({model.provider})
-            </option>
-          ))}
-        </select>
-        
-        <p className="text-xs text-muted-foreground mt-2">
-          💡 Tip: Use Ollama models for subagents - they&apos;re free and unlimited!
-        </p>
+      )}
+
+      {/* Quick Presets */}
+      <div className="p-6 rounded-xl bg-secondary/30 border border-border">
+        <h3 className="font-semibold mb-3">🚀 Quick Presets</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <button
+            onClick={() => {
+              onSetPrimary("anthropic/claude-opus-4-5");
+              saveSlots([
+                { role: "coding", model: "openai-codex/gpt-5.2-codex", description: "Code tasks" },
+                { role: "fast", model: "ollama/qwen3:8b", description: "Quick tasks" },
+              ]);
+            }}
+            className="p-4 rounded-xl bg-card hover:bg-card/80 border border-border text-left transition-colors"
+          >
+            <p className="font-medium">💰 Cost Optimized</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Opus for thinking, Codex for code, Ollama for grunt work
+            </p>
+          </button>
+          
+          <button
+            onClick={() => {
+              onSetPrimary("anthropic/claude-sonnet-4-20250514");
+              saveSlots([
+                { role: "fast", model: "ollama/llama3.2:3b", description: "Quick tasks" },
+              ]);
+            }}
+            className="p-4 rounded-xl bg-card hover:bg-card/80 border border-border text-left transition-colors"
+          >
+            <p className="font-medium">⚡ Speed Optimized</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Sonnet for most tasks, fast local model for simple stuff
+            </p>
+          </button>
+          
+          <button
+            onClick={() => {
+              onSetPrimary("ollama/qwen3:32b");
+              saveSlots([
+                { role: "coding", model: "ollama/qwen2.5-coder:32b-instruct-q8_0", description: "Code tasks" },
+                { role: "vision", model: "ollama/qwen2.5vl:32b-q4_K_M", description: "Vision tasks" },
+                { role: "fast", model: "ollama/llama3.2:3b", description: "Quick tasks" },
+              ]);
+            }}
+            className="p-4 rounded-xl bg-card hover:bg-card/80 border border-border text-left transition-colors"
+          >
+            <p className="font-medium">🏠 All Local (Free)</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              100% Ollama - no API costs, full privacy
+            </p>
+          </button>
+          
+          <button
+            onClick={() => {
+              saveSlots([]);
+            }}
+            className="p-4 rounded-xl bg-card hover:bg-card/80 border border-border text-left transition-colors"
+          >
+            <p className="font-medium">🎯 Simple (Primary Only)</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Just use primary model for everything
+            </p>
+          </button>
+        </div>
       </div>
 
       {/* Current Configuration Summary */}
       <div className="p-6 rounded-xl bg-card border border-border">
         <h3 className="font-semibold mb-4">Current Configuration</h3>
-        <div className="space-y-3 text-sm">
+        <div className="space-y-2 text-sm">
           <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
-            <span className="text-muted-foreground">Primary</span>
-            <span className="font-mono">{primaryModel || "Not set"}</span>
+            <span className="text-muted-foreground">🧠 Primary</span>
+            <span className="font-mono text-xs">{primaryModel || "Not set"}</span>
           </div>
-          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
-            <span className="text-muted-foreground">Subagent</span>
-            <span className="font-mono">{subagentModel || "(uses primary)"}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Recommended Hierarchy */}
-      <div className="p-6 rounded-xl bg-secondary/30 border border-border">
-        <h3 className="font-semibold mb-3">💡 Recommended Setup</h3>
-        <div className="space-y-2 text-sm text-muted-foreground">
-          <p><strong className="text-foreground">For cost savings:</strong></p>
-          <ul className="list-disc list-inside ml-2 space-y-1">
-            <li>Primary: Claude Opus or GPT-4o (best quality)</li>
-            <li>Subagent: Ollama qwen3:8b (free, good tool use)</li>
-          </ul>
-          <p className="mt-3"><strong className="text-foreground">For speed:</strong></p>
-          <ul className="list-disc list-inside ml-2 space-y-1">
-            <li>Primary: Claude Sonnet or GPT-4o-mini</li>
-            <li>Subagent: Ollama llama3.2:3b (fastest)</li>
-          </ul>
+          {slots.map((slot, i) => {
+            const roleInfo = DEFAULT_ROLES.find(r => r.role === slot.role);
+            return (
+              <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-secondary/50">
+                <span className="text-muted-foreground">{roleInfo?.label || slot.role}</span>
+                <span className="font-mono text-xs">{slot.model || "(uses primary)"}</span>
+              </div>
+            );
+          })}
+          {slots.length === 0 && (
+            <p className="text-center text-muted-foreground py-2">No additional roles configured</p>
+          )}
         </div>
       </div>
     </div>
