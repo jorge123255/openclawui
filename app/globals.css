@@ -58,3 +58,19 @@
 ::selection {
   background: rgba(99, 102, 241, 0.3);
 }
+
+/* Hide scrollbar for horizontal scroll areas */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Touch-friendly tap targets */
+@media (max-width: 640px) {
+  button, a {
+    min-height: 44px;
+  }
+}

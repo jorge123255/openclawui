@@ -193,20 +193,21 @@ export default function SettingsPage() {
         </div>
       </header>
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-border pb-2">
+      {/* Tabs - scrollable on mobile */}
+      <div className="flex gap-2 mb-6 border-b border-border pb-2 overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap shrink-0 ${
               activeTab === tab.id
                 ? "bg-primary text-primary-foreground"
                 : "hover:bg-secondary"
             }`}
           >
             <tab.icon className="w-4 h-4" />
-            {tab.label}
+            <span className="hidden sm:inline">{tab.label}</span>
+            <span className="sm:hidden">{tab.label.substring(0, 3)}</span>
           </button>
         ))}
       </div>
