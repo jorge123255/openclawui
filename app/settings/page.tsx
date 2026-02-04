@@ -4,385 +4,651 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
-  ArrowLeft,
-  Server,
+  Settings,
+  ChevronLeft,
   Key,
-  Bell,
-  Shield,
-  Palette,
-  Terminal,
+  MessageSquare,
+  Server,
   Save,
-  RefreshCw,
-  Check,
-  ExternalLink,
-  Copy,
+  Loader2,
   Eye,
   EyeOff,
+  Check,
+  AlertCircle,
+  RefreshCw,
+  Trash2,
+  Plus,
 } from "lucide-react";
-import toast from "react-hot-toast";
 
-interface Config {
-  serverUrl: string;
-  gatewayToken: string;
-  anthropicKey: string;
-  openaiKey: string;
-  elevenLabsKey: string;
-  notifications: boolean;
-  theme: "dark" | "light" | "system";
-}
+type Tab = "channels" | "api-keys" | "gateway" | "advanced";
 
 export default function SettingsPage() {
-  const [config, setConfig] = useState<Config>({
-    serverUrl: "",
-    gatewayToken: "",
-    anthropicKey: "",
-    openaiKey: "",
-    elevenLabsKey: "",
-    notifications: true,
-    theme: "dark",
-  });
-  const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<Tab>("channels");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [config, setConfig] = useState<any>({});
+  const [changes, setChanges] = useState<Record<string, any>>({});
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadConfig();
   }, []);
 
-  function loadConfig() {
-    const saved = localStorage.getItem("config");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setConfig((prev) => ({ ...prev, ...parsed }));
-      } catch {}
+  async function loadConfig() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config-get" }),
+      });
+      const data = await res.json();
+      if (data.config) {
+        setConfig(data.config);
+      }
+    } catch (e) {
+      console.error("Failed to load config:", e);
     }
+    setLoading(false);
   }
 
-  async function saveConfig() {
+  async function saveChanges() {
+    if (Object.keys(changes).length === 0) return;
+    
     setSaving(true);
     try {
-      localStorage.setItem("config", JSON.stringify(config));
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config-patch", config: changes }),
+      });
+      const data = await res.json();
       
-      // If we have a gateway connection, sync settings
-      if (config.serverUrl && config.gatewayToken) {
-        try {
-          await fetch(`http://${config.serverUrl}:18789/api/config`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Gateway-Token": config.gatewayToken,
-            },
-            body: JSON.stringify(config),
-          });
-        } catch {
-          // Gateway might not be reachable, that's ok
-        }
+      if (data.success) {
+        setChanges({});
+        await loadConfig(); // Reload to get updated config
+      } else {
+        alert(`Failed to save: ${data.error}`);
       }
-
-      toast.success("Settings saved!");
-    } catch (error) {
-      toast.error("Failed to save settings");
+    } catch (e: any) {
+      alert(`Error saving: ${e.message}`);
     }
     setSaving(false);
   }
 
-  function toggleShowToken(key: string) {
-    setShowTokens((prev) => ({ ...prev, [key]: !prev[key] }));
+  function updateField(path: string, value: any) {
+    setChanges(prev => ({ ...prev, [path]: value }));
   }
 
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
+  function toggleSecret(key: string) {
+    setShowSecrets(prev => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function maskValue(value: string | undefined): string {
+    if (!value) return "";
+    if (value.length <= 8) return "••••••••";
+    return value.substring(0, 4) + "••••" + value.substring(value.length - 4);
+  }
+
+  const tabs: { id: Tab; label: string; icon: any }[] = [
+    { id: "channels", label: "Channels", icon: MessageSquare },
+    { id: "api-keys", label: "API Keys", icon: Key },
+    { id: "gateway", label: "Gateway", icon: Server },
+    { id: "advanced", label: "Advanced", icon: Settings },
+  ];
+
+  const hasChanges = Object.keys(changes).length > 0;
+
+  if (loading) {
+    return (
+      <main className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </main>
+    );
   }
 
   return (
-    <main className="min-h-screen p-8 max-w-3xl mx-auto">
+    <main className="min-h-screen p-8">
       {/* Header */}
-      <header className="flex items-center gap-4 mb-8">
-        <Link
-          href="/"
-          className="p-2 rounded-lg hover:bg-secondary transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-sm text-muted-foreground">
-            Configure your OpenClaw instance
-          </p>
+      <header className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+          <Link
+            href="/"
+            className="p-2 rounded-lg hover:bg-secondary transition-colors"
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </Link>
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
+              <Settings className="w-7 h-7 text-purple-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">Settings</h1>
+              <p className="text-sm text-muted-foreground">
+                Configure OpenClaw
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => loadConfig()}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Reload
+          </button>
+          
+          {hasChanges && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              onClick={saveChanges}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover font-medium transition-colors"
+            >
+              {saving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              Save Changes
+            </motion.button>
+          )}
         </div>
       </header>
 
-      <div className="space-y-6">
-        {/* Gateway Connection */}
-        <Section
-          icon={Server}
-          title="Gateway Connection"
-          description="Connect to your OpenClaw server"
-        >
-          <div className="space-y-4">
-            <InputField
-              label="Server Address"
-              placeholder="192.168.1.82 or localhost"
-              value={config.serverUrl}
-              onChange={(v) => setConfig({ ...config, serverUrl: v })}
-              hint="IP or hostname of your OpenClaw server"
-            />
-            <InputField
-              label="Gateway Token"
-              placeholder="Your gateway token"
-              value={config.gatewayToken}
-              onChange={(v) => setConfig({ ...config, gatewayToken: v })}
-              secret
-              showSecret={showTokens.gateway}
-              onToggleSecret={() => toggleShowToken("gateway")}
-              hint={
-                <span>
-                  Run <code className="bg-background px-1 rounded text-xs">openclaw config get gateway.token</code> to get this
-                </span>
-              }
-            />
-          </div>
-        </Section>
-
-        {/* API Keys */}
-        <Section
-          icon={Key}
-          title="API Keys"
-          description="Authentication for AI providers"
-        >
-          <div className="space-y-4">
-            <InputField
-              label="Anthropic API Key"
-              placeholder="sk-ant-..."
-              value={config.anthropicKey}
-              onChange={(v) => setConfig({ ...config, anthropicKey: v })}
-              secret
-              showSecret={showTokens.anthropic}
-              onToggleSecret={() => toggleShowToken("anthropic")}
-              hint={
-                <a href="https://console.anthropic.com" target="_blank" className="text-primary hover:underline flex items-center gap-1">
-                  Get key from Anthropic Console <ExternalLink className="w-3 h-3" />
-                </a>
-              }
-            />
-            <InputField
-              label="OpenAI API Key"
-              placeholder="sk-..."
-              value={config.openaiKey}
-              onChange={(v) => setConfig({ ...config, openaiKey: v })}
-              secret
-              showSecret={showTokens.openai}
-              onToggleSecret={() => toggleShowToken("openai")}
-              hint={
-                <a href="https://platform.openai.com/api-keys" target="_blank" className="text-primary hover:underline flex items-center gap-1">
-                  Get key from OpenAI <ExternalLink className="w-3 h-3" />
-                </a>
-              }
-            />
-            <InputField
-              label="ElevenLabs API Key"
-              placeholder="..."
-              value={config.elevenLabsKey}
-              onChange={(v) => setConfig({ ...config, elevenLabsKey: v })}
-              secret
-              showSecret={showTokens.elevenlabs}
-              onToggleSecret={() => toggleShowToken("elevenlabs")}
-              hint="For text-to-speech with custom voices"
-            />
-          </div>
-        </Section>
-
-        {/* Notifications */}
-        <Section
-          icon={Bell}
-          title="Notifications"
-          description="How OpenClaw alerts you"
-        >
-          <div className="flex items-center justify-between p-4 bg-secondary rounded-xl">
-            <div>
-              <p className="font-medium">Push Notifications</p>
-              <p className="text-sm text-muted-foreground">
-                Get notified about important events
-              </p>
-            </div>
-            <button
-              onClick={() => setConfig({ ...config, notifications: !config.notifications })}
-              className={`w-12 h-7 rounded-full transition-colors ${
-                config.notifications ? "bg-accent" : "bg-muted"
-              }`}
-            >
-              <div
-                className={`w-5 h-5 bg-white rounded-full transition-transform ${
-                  config.notifications ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </div>
-        </Section>
-
-        {/* Appearance */}
-        <Section
-          icon={Palette}
-          title="Appearance"
-          description="Customize the UI"
-        >
-          <div className="grid grid-cols-3 gap-3">
-            {(["dark", "light", "system"] as const).map((theme) => (
-              <button
-                key={theme}
-                onClick={() => setConfig({ ...config, theme })}
-                className={`p-4 rounded-xl border-2 capitalize transition-all ${
-                  config.theme === theme
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:border-primary/50"
-                }`}
-              >
-                {theme}
-              </button>
-            ))}
-          </div>
-        </Section>
-
-        {/* Danger Zone */}
-        <Section
-          icon={Shield}
-          title="Danger Zone"
-          description="Destructive actions"
-          danger
-        >
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                if (confirm("Reset the setup wizard? Your OpenClaw config stays intact.")) {
-                  localStorage.removeItem("setupComplete");
-                  window.location.href = "/";
-                }
-              }}
-              className="w-full p-4 rounded-xl border border-border hover:border-destructive/50 text-left transition-colors"
-            >
-              <p className="font-medium">Restart Setup Wizard</p>
-              <p className="text-sm text-muted-foreground">
-                Go through setup again without losing data
-              </p>
-            </button>
-            <button
-              onClick={async () => {
-                if (confirm("⚠️ FULL RESET: This will wipe all settings. Continue?")) {
-                  localStorage.clear();
-                  window.location.href = "/";
-                }
-              }}
-              className="w-full p-4 rounded-xl border border-destructive/50 bg-destructive/10 text-left hover:bg-destructive/20 transition-colors"
-            >
-              <p className="font-medium text-destructive">Full Reset</p>
-              <p className="text-sm text-destructive/70">
-                Clear all settings and start fresh
-              </p>
-            </button>
-          </div>
-        </Section>
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6 border-b border-border pb-2">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+              activeTab === tab.id
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-secondary"
+            }`}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Save Button */}
-      <div className="fixed bottom-8 right-8">
-        <button
-          onClick={saveConfig}
-          disabled={saving}
-          className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-hover rounded-xl font-semibold shadow-lg transition-all hover:scale-105"
-        >
-          {saving ? (
-            <RefreshCw className="w-5 h-5 animate-spin" />
-          ) : (
-            <Save className="w-5 h-5" />
-          )}
-          Save Changes
-        </button>
+      {/* Content */}
+      <div className="max-w-3xl">
+        {activeTab === "channels" && (
+          <ChannelsTab
+            config={config}
+            changes={changes}
+            onUpdate={updateField}
+            showSecrets={showSecrets}
+            toggleSecret={toggleSecret}
+            maskValue={maskValue}
+          />
+        )}
+        
+        {activeTab === "api-keys" && (
+          <ApiKeysTab
+            config={config}
+            changes={changes}
+            onUpdate={updateField}
+            showSecrets={showSecrets}
+            toggleSecret={toggleSecret}
+            maskValue={maskValue}
+          />
+        )}
+        
+        {activeTab === "gateway" && (
+          <GatewayTab
+            config={config}
+            changes={changes}
+            onUpdate={updateField}
+          />
+        )}
+        
+        {activeTab === "advanced" && (
+          <AdvancedTab
+            config={config}
+            changes={changes}
+            onUpdate={updateField}
+          />
+        )}
       </div>
     </main>
   );
 }
 
-function Section({
-  icon: Icon,
-  title,
-  description,
-  children,
-  danger,
+// Tab Components
+
+function ChannelsTab({
+  config,
+  changes,
+  onUpdate,
+  showSecrets,
+  toggleSecret,
+  maskValue,
 }: {
-  icon: any;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-  danger?: boolean;
+  config: any;
+  changes: Record<string, any>;
+  onUpdate: (path: string, value: any) => void;
+  showSecrets: Record<string, boolean>;
+  toggleSecret: (key: string) => void;
+  maskValue: (value: string | undefined) => string;
 }) {
+  const telegram = config?.channels?.telegram || {};
+  const discord = config?.channels?.discord || {};
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={`glass rounded-2xl p-6 ${danger ? "border-destructive/30" : ""}`}
-    >
-      <div className="flex items-center gap-3 mb-4">
-        <Icon className={`w-5 h-5 ${danger ? "text-destructive" : "text-primary"}`} />
-        <div>
-          <h2 className="font-semibold">{title}</h2>
-          <p className="text-sm text-muted-foreground">{description}</p>
+    <div className="space-y-6">
+      {/* Telegram */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            📱 Telegram
+            {telegram.botToken && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                Configured
+              </span>
+            )}
+          </h3>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <span className="text-sm text-muted-foreground">Enabled</span>
+            <input
+              type="checkbox"
+              checked={changes["channels.telegram.enabled"] ?? telegram.enabled ?? true}
+              onChange={(e) => onUpdate("channels.telegram.enabled", e.target.checked)}
+              className="w-5 h-5 rounded accent-primary"
+            />
+          </label>
         </div>
-      </div>
-      {children}
-    </motion.div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Bot Token</label>
+            <div className="flex gap-2">
+              <input
+                type={showSecrets["telegram-token"] ? "text" : "password"}
+                value={changes["channels.telegram.botToken"] ?? (showSecrets["telegram-token"] ? telegram.botToken : maskValue(telegram.botToken))}
+                onChange={(e) => onUpdate("channels.telegram.botToken", e.target.value)}
+                placeholder="1234567890:ABCdef..."
+                className="flex-1 px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+              />
+              <button
+                onClick={() => toggleSecret("telegram-token")}
+                className="px-3 py-2 bg-secondary rounded-lg hover:bg-secondary/80 transition-colors"
+              >
+                {showSecrets["telegram-token"] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">DM Policy</label>
+            <select
+              value={changes["channels.telegram.dmPolicy"] ?? telegram.dmPolicy ?? "pairing"}
+              onChange={(e) => onUpdate("channels.telegram.dmPolicy", e.target.value)}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            >
+              <option value="pairing">Pairing (require /pair)</option>
+              <option value="allowlist">Allowlist only</option>
+              <option value="open">Open (anyone can DM)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Group Policy</label>
+            <select
+              value={changes["channels.telegram.groupPolicy"] ?? telegram.groupPolicy ?? "allowlist"}
+              onChange={(e) => onUpdate("channels.telegram.groupPolicy", e.target.value)}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            >
+              <option value="allowlist">Allowlist only</option>
+              <option value="open">Open (any group)</option>
+              <option value="deny">Deny all groups</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {/* Discord */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            🎮 Discord
+            {discord.token && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                Configured
+              </span>
+            )}
+          </h3>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <span className="text-sm text-muted-foreground">Enabled</span>
+            <input
+              type="checkbox"
+              checked={changes["channels.discord.enabled"] ?? discord.enabled ?? false}
+              onChange={(e) => onUpdate("channels.discord.enabled", e.target.checked)}
+              className="w-5 h-5 rounded accent-primary"
+            />
+          </label>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Bot Token</label>
+            <div className="flex gap-2">
+              <input
+                type={showSecrets["discord-token"] ? "text" : "password"}
+                value={changes["channels.discord.token"] ?? (showSecrets["discord-token"] ? discord.token : maskValue(discord.token))}
+                onChange={(e) => onUpdate("channels.discord.token", e.target.value)}
+                placeholder="MTIzNDU2Nzg5..."
+                className="flex-1 px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+              />
+              <button
+                onClick={() => toggleSecret("discord-token")}
+                className="px-3 py-2 bg-secondary rounded-lg hover:bg-secondary/80 transition-colors"
+              >
+                {showSecrets["discord-token"] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function InputField({
-  label,
-  placeholder,
-  value,
-  onChange,
-  secret,
-  showSecret,
-  onToggleSecret,
-  hint,
+function ApiKeysTab({
+  config,
+  changes,
+  onUpdate,
+  showSecrets,
+  toggleSecret,
+  maskValue,
 }: {
-  label: string;
-  placeholder: string;
-  value: string;
-  onChange: (v: string) => void;
-  secret?: boolean;
-  showSecret?: boolean;
-  onToggleSecret?: () => void;
-  hint?: React.ReactNode;
+  config: any;
+  changes: Record<string, any>;
+  onUpdate: (path: string, value: any) => void;
+  showSecrets: Record<string, boolean>;
+  toggleSecret: (key: string) => void;
+  maskValue: (value: string | undefined) => string;
 }) {
+  const env = config?.env || {};
+
+  const apiKeys = [
+    { key: "OPENAI_API_KEY", label: "OpenAI", placeholder: "sk-..." },
+    { key: "ANTHROPIC_API_KEY", label: "Anthropic", placeholder: "sk-ant-..." },
+    { key: "ELEVENLABS_API_KEY", label: "ElevenLabs (TTS)", placeholder: "sk_..." },
+    { key: "N8N_API_KEY", label: "N8N", placeholder: "eyJ..." },
+  ];
+
   return (
-    <div>
-      <label className="block text-sm font-medium mb-2">{label}</label>
-      <div className="relative">
-        <input
-          type={secret && !showSecret ? "password" : "text"}
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full px-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none transition-colors pr-20"
-        />
-        {secret && (
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-            <button
-              type="button"
-              onClick={onToggleSecret}
-              className="p-2 hover:bg-background rounded-lg transition-colors"
-            >
-              {showSecret ? (
-                <EyeOff className="w-4 h-4 text-muted-foreground" />
-              ) : (
-                <Eye className="w-4 h-4 text-muted-foreground" />
-              )}
-            </button>
+    <div className="space-y-6">
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="text-lg font-semibold mb-4">API Keys</h3>
+        <p className="text-sm text-muted-foreground mb-6">
+          These keys are stored in your local OpenClaw config. For OAuth providers (Anthropic, OpenAI),
+          use <code className="bg-secondary px-1 rounded">claude auth</code> or{" "}
+          <code className="bg-secondary px-1 rounded">codex auth</code> instead.
+        </p>
+
+        <div className="space-y-4">
+          {apiKeys.map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label className="block text-sm font-medium mb-2">{label}</label>
+              <div className="flex gap-2">
+                <input
+                  type={showSecrets[key] ? "text" : "password"}
+                  value={changes[`env.${key}`] ?? (showSecrets[key] ? env[key] : maskValue(env[key]))}
+                  onChange={(e) => onUpdate(`env.${key}`, e.target.value)}
+                  placeholder={placeholder}
+                  className="flex-1 px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+                />
+                <button
+                  onClick={() => toggleSecret(key)}
+                  className="px-3 py-2 bg-secondary rounded-lg hover:bg-secondary/80 transition-colors"
+                >
+                  {showSecrets[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Service URLs */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="text-lg font-semibold mb-4">Service URLs</h3>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Ollama URL</label>
+            <input
+              type="text"
+              value={changes["models.providers.ollama.baseUrl"] ?? config?.models?.providers?.ollama?.baseUrl ?? "http://localhost:11434/v1"}
+              onChange={(e) => onUpdate("models.providers.ollama.baseUrl", e.target.value)}
+              placeholder="http://localhost:11434/v1"
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+            />
           </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">N8N URL</label>
+            <input
+              type="text"
+              value={changes["env.N8N_BASE_URL"] ?? env.N8N_BASE_URL ?? ""}
+              onChange={(e) => onUpdate("env.N8N_BASE_URL", e.target.value)}
+              placeholder="http://localhost:5678"
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+            />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function GatewayTab({
+  config,
+  changes,
+  onUpdate,
+}: {
+  config: any;
+  changes: Record<string, any>;
+  onUpdate: (path: string, value: any) => void;
+}) {
+  const gateway = config?.gateway || {};
+
+  return (
+    <div className="space-y-6">
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="text-lg font-semibold mb-4">Gateway Settings</h3>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Port</label>
+            <input
+              type="number"
+              value={changes["gateway.port"] ?? gateway.port ?? 18789}
+              onChange={(e) => onUpdate("gateway.port", parseInt(e.target.value))}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Bind Mode</label>
+            <select
+              value={changes["gateway.bind"] ?? gateway.bind ?? "lan"}
+              onChange={(e) => onUpdate("gateway.bind", e.target.value)}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            >
+              <option value="localhost">Localhost only (127.0.0.1)</option>
+              <option value="lan">LAN (0.0.0.0)</option>
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">
+              LAN allows connections from other devices on your network
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Auth Mode</label>
+            <select
+              value={changes["gateway.auth.mode"] ?? gateway.auth?.mode ?? "token"}
+              onChange={(e) => onUpdate("gateway.auth.mode", e.target.value)}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            >
+              <option value="token">Token auth</option>
+              <option value="none">No auth (local only)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {/* Workspace */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="text-lg font-semibold mb-4">Workspace</h3>
+        
+        <div>
+          <label className="block text-sm font-medium mb-2">Agent Workspace Path</label>
+          <input
+            type="text"
+            value={changes["agents.defaults.workspace"] ?? config?.agents?.defaults?.workspace ?? ""}
+            onChange={(e) => onUpdate("agents.defaults.workspace", e.target.value)}
+            placeholder="/path/to/workspace"
+            className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Where the agent reads/writes files (AGENTS.md, MEMORY.md, etc.)
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AdvancedTab({
+  config,
+  changes,
+  onUpdate,
+}: {
+  config: any;
+  changes: Record<string, any>;
+  onUpdate: (path: string, value: any) => void;
+}) {
+  const [showRaw, setShowRaw] = useState(false);
+
+  return (
+    <div className="space-y-6">
+      {/* TTS */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="text-lg font-semibold mb-4">Text-to-Speech</h3>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">ElevenLabs Voice ID</label>
+            <input
+              type="text"
+              value={changes["env.ELEVENLABS_VOICE_ID"] ?? config?.env?.ELEVENLABS_VOICE_ID ?? ""}
+              onChange={(e) => onUpdate("env.ELEVENLABS_VOICE_ID", e.target.value)}
+              placeholder="Voice ID"
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none font-mono text-sm"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Concurrency */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <h3 className="text-lg font-semibold mb-4">Concurrency</h3>
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">Max Concurrent Agents</label>
+            <input
+              type="number"
+              value={changes["agents.defaults.maxConcurrent"] ?? config?.agents?.defaults?.maxConcurrent ?? 4}
+              onChange={(e) => onUpdate("agents.defaults.maxConcurrent", parseInt(e.target.value))}
+              min={1}
+              max={16}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Max Subagents</label>
+            <input
+              type="number"
+              value={changes["agents.defaults.subagents.maxConcurrent"] ?? config?.agents?.defaults?.subagents?.maxConcurrent ?? 8}
+              onChange={(e) => onUpdate("agents.defaults.subagents.maxConcurrent", parseInt(e.target.value))}
+              min={1}
+              max={32}
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Raw Config */}
+      <section className="p-6 rounded-xl bg-card border border-border">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Raw Config</h3>
+          <button
+            onClick={() => setShowRaw(!showRaw)}
+            className="text-sm text-primary hover:underline"
+          >
+            {showRaw ? "Hide" : "Show"}
+          </button>
+        </div>
+        
+        {showRaw && (
+          <pre className="p-4 rounded-lg bg-background text-xs font-mono overflow-auto max-h-96">
+            {JSON.stringify(config, null, 2)}
+          </pre>
         )}
-      </div>
-      {hint && (
-        <p className="text-xs text-muted-foreground mt-1">{hint}</p>
-      )}
+      </section>
+
+      {/* Danger Zone */}
+      <section className="p-6 rounded-xl bg-destructive/10 border border-destructive/30">
+        <h3 className="text-lg font-semibold text-destructive mb-4">Danger Zone</h3>
+        
+        <div className="space-y-3">
+          <button
+            onClick={() => {
+              if (confirm("Restart the gateway? Active sessions will be interrupted.")) {
+                fetch("/api/gateway", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "stop" }),
+                }).then(() => {
+                  setTimeout(() => {
+                    fetch("/api/gateway", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "start" }),
+                    });
+                  }, 1000);
+                });
+              }
+            }}
+            className="w-full py-3 bg-secondary hover:bg-secondary/80 rounded-lg font-medium transition-colors"
+          >
+            Restart Gateway
+          </button>
+          
+          <button
+            onClick={() => {
+              if (confirm("⚠️ This will clear your local UI settings. OpenClaw config stays intact. Continue?")) {
+                localStorage.clear();
+                window.location.href = "/";
+              }
+            }}
+            className="w-full py-3 bg-destructive/20 hover:bg-destructive/30 text-destructive rounded-lg font-medium transition-colors"
+          >
+            Reset UI Settings
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
