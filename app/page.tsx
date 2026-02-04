@@ -132,8 +132,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {/* Quick Actions - Row 1 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <QuickAction
           href="/models"
           icon={Cpu}
@@ -161,6 +161,38 @@ export default function Home() {
           title="Settings"
           description="Configure everything"
           color="purple"
+        />
+      </div>
+
+      {/* Quick Actions - Row 2 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <QuickAction
+          href="/sessions"
+          icon={MessageSquare}
+          title="Sessions"
+          description="Active conversations"
+          color="blue"
+        />
+        <QuickAction
+          href="/cron"
+          icon={Activity}
+          title="Cron Jobs"
+          description="Scheduled tasks"
+          color="orange"
+        />
+        <QuickAction
+          href="/nodes"
+          icon={Zap}
+          title="Nodes"
+          description="Paired devices"
+          color="green"
+        />
+        <QuickAction
+          href="/logs"
+          icon={Shield}
+          title="Logs"
+          description="Debug & monitor"
+          color="red"
         />
       </div>
 
@@ -357,6 +389,10 @@ function QuickAction({
     accent: "from-accent/20 to-accent/5 hover:from-accent/30",
     yellow: "from-yellow-500/20 to-yellow-500/5 hover:from-yellow-500/30",
     purple: "from-purple-500/20 to-purple-500/5 hover:from-purple-500/30",
+    blue: "from-blue-500/20 to-blue-500/5 hover:from-blue-500/30",
+    orange: "from-orange-500/20 to-orange-500/5 hover:from-orange-500/30",
+    green: "from-green-500/20 to-green-500/5 hover:from-green-500/30",
+    red: "from-red-500/20 to-red-500/5 hover:from-red-500/30",
   };
 
   return (
