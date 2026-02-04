@@ -35,6 +35,8 @@ export async function POST(request: Request) {
         return await patchConfig(config);
       case "config-get":
         return await getConfig();
+      case "check-configured":
+        return await checkConfigured();
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -126,4 +128,82 @@ async function getConfig() {
       error: error.message,
     });
   }
+}
+
+// Check what's actually configured in the system
+async function checkConfigured() {
+  const checks = {
+    gatewayRunning: false,
+    configExists: false,
+    hasAnthropicKey: false,
+    hasOpenAIKey: false,
+    hasTelegram: false,
+    hasDiscord: false,
+    hasWhatsApp: false,
+    hasSignal: false,
+    hasOllama: false,
+    isFullyConfigured: false,
+  };
+
+  try {
+    // Check if config file exists and read it
+    const configData = await readFile(OPENCLAW_CONFIG, "utf-8");
+    const config = JSON.parse(configData);
+    checks.configExists = true;
+
+    // Check for AI provider keys OR OAuth profiles
+    const authProfiles = config?.auth?.profiles || {};
+    const hasAnthropicProfile = Object.values(authProfiles).some(
+      (p: any) => p.provider === "anthropic"
+    );
+    const anthropicKey = config?.providers?.anthropic?.apiKey || process.env.ANTHROPIC_API_KEY;
+    checks.hasAnthropicKey = hasAnthropicProfile || !!(anthropicKey && anthropicKey.length > 10);
+
+    const hasOpenAIProfile = Object.values(authProfiles).some(
+      (p: any) => p.provider === "openai" || p.provider === "openai-codex"
+    );
+    const openaiKey = config?.providers?.openai?.apiKey || process.env.OPENAI_API_KEY;
+    checks.hasOpenAIKey = hasOpenAIProfile || !!(openaiKey && openaiKey.length > 10);
+
+    // Check for channel configs
+    const channels = config?.channels || {};
+    checks.hasTelegram = !!(channels.telegram?.botToken && channels.telegram?.botToken.length > 10);
+    checks.hasDiscord = !!(channels.discord?.botToken && channels.discord?.botToken.length > 10);
+    checks.hasWhatsApp = !!channels.whatsapp?.enabled;
+    checks.hasSignal = !!channels.signal?.enabled;
+
+    // Check Ollama - try common URLs
+    const ollamaUrls = [
+      config?.providers?.ollama?.baseUrl,
+      config?.models?.ollama?.baseUrl,
+      "http://192.168.1.10:11434",
+      "http://localhost:11434"
+    ].filter(Boolean);
+    
+    for (const url of ollamaUrls) {
+      try {
+        const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          checks.hasOllama = true;
+          break;
+        }
+      } catch {}
+    }
+  } catch (e) {
+    // Config doesn't exist or can't be read
+  }
+
+  // Check if gateway is running (use ps|grep since pgrep is unreliable on macOS)
+  try {
+    const { stdout } = await execAsync("ps aux | grep -c '[o]penclaw-gateway\\|[c]lawdbot-gateway'", { timeout: 2000 });
+    checks.gatewayRunning = parseInt(stdout.trim()) > 0;
+  } catch {
+    checks.gatewayRunning = false;
+  }
+
+  // Fully configured = gateway running + at least one AI provider + optionally a channel
+  checks.isFullyConfigured = checks.gatewayRunning && 
+    (checks.hasAnthropicKey || checks.hasOpenAIKey);
+
+  return NextResponse.json(checks);
 }

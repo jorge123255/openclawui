@@ -207,24 +207,26 @@ export default function Home() {
       const res = await fetch("/api/gateway", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "status" }),
+        body: JSON.stringify({ action: "check-configured" }),
       });
-      const data = await res.json();
+      const checks = await res.json();
       
-      // If gateway is running, setup is already complete
-      if (data.running) {
+      // Fully configured = gateway running + AI provider configured
+      if (checks.isFullyConfigured) {
         localStorage.setItem("setupComplete", "true");
         setIsFirstRun(false);
-        setGatewayStatus({ connected: true, ...data });
+        setGatewayStatus({ connected: checks.gatewayRunning });
         checkSystemStatus();
         loadStats();
         const interval = setInterval(loadStats, 30000);
         return () => clearInterval(interval);
       } else {
+        // Store what we found so setup can show it
+        localStorage.setItem("detectedConfig", JSON.stringify(checks));
         setIsFirstRun(true);
       }
     } catch {
-      // Gateway check failed - show setup
+      // Check failed - show setup
       setIsFirstRun(true);
     }
   }
