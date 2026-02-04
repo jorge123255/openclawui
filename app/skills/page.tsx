@@ -94,8 +94,11 @@ export default function SkillsPage() {
     setLoading(false);
   }
 
+  const [installSuccess, setInstallSuccess] = useState<string | null>(null);
+
   async function installSkill(name: string) {
     setInstalling(name);
+    setInstallSuccess(null);
     try {
       const res = await fetch("/api/skills", {
         method: "POST",
@@ -104,7 +107,10 @@ export default function SkillsPage() {
       });
       const data = await res.json();
       if (data.success) {
+        setInstallSuccess(name);
         await loadSkills();
+        // Auto-hide success message after 5 seconds
+        setTimeout(() => setInstallSuccess(null), 5000);
       } else {
         alert(`Failed to install: ${data.error}`);
       }
@@ -195,6 +201,28 @@ export default function SkillsPage() {
           </a>
         </div>
       </header>
+
+      {/* Success Banner */}
+      {installSuccess && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className="mb-6 p-4 rounded-xl bg-accent/20 border border-accent/30 flex items-center gap-3"
+        >
+          <Check className="w-5 h-5 text-accent" />
+          <div className="flex-1">
+            <p className="font-medium text-accent">Installed "{installSuccess}" successfully!</p>
+            <p className="text-sm text-muted-foreground">✓ No restart required — skill is ready to use immediately</p>
+          </div>
+          <button
+            onClick={() => setInstallSuccess(null)}
+            className="p-1 rounded hover:bg-accent/20 transition-colors"
+          >
+            ✕
+          </button>
+        </motion.div>
+      )}
 
       {/* Search */}
       <div className="relative mb-6">
