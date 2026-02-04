@@ -1,120 +1,113 @@
 # OpenClaw UI 🦞
 
-A beautiful, user-friendly interface for setting up and managing OpenClaw/Clawdbot.
-
-**Make AI assistants accessible to everyone - no terminal required.**
-
-![OpenClaw UI](./docs/screenshot.png)
+A beautiful web interface for OpenClaw/Clawdbot - control your AI assistant without touching the terminal.
 
 ## Features
 
-### 🧙‍♂️ Setup Wizard
-- Guided installation process
-- Choose deployment: Local, Docker, or Remote
-- Connect channels: Telegram, Discord, SMS
-- Link integrations: Email, Calendar, Smart Home
+### 💬 Chat
+- Talk to your assistant from the browser
+- **Voice input** - Tap mic to speak (Web Speech API)
+- **Push notifications** - Get notified when assistant replies
+- Message history with copy/clear
 
-### 🧠 AI Model Management
-- **Auto-detect hardware** (GPU, RAM, VRAM)
-- **Ollama integration**
-  - See installed models
-  - Browse Ollama library
-  - One-click pull & install
-  - Model recommendations based on your hardware
-- **Multi-provider support**
-  - Anthropic (Claude)
-  - OpenAI (GPT-4)
-  - Google (Gemini)
-  - Local (Ollama, LM Studio)
-- **AI Hierarchy** - Drag & drop to prioritize models
+### 🔗 Connections
+- **Google Workspace** - Gmail, Calendar, Contacts, Drive
+- **GitHub** - Repos, issues, PRs, Actions
+- **Apple Reminders** - Lists, tasks, due dates
+- **Things 3** - Projects, todos, areas
+- **iMessage** - Messages, chats
+- One-click OAuth/permission setup
 
-### 🔌 Integrations Hub
-Visual connection manager for:
-- 📧 Email (Gmail, Outlook, IMAP)
-- 📅 Calendar (Google, Apple, Outlook)
-- 🏠 Smart Home (HomeKit, Google Home, Alexa)
-- 📹 Cameras (UniFi Protect, Ring, Wyze)
-- 💬 Messaging (Telegram, Discord, Slack, Signal)
-- 🔧 Custom webhooks
+### 🧠 AI Models
+- Primary model picker (Anthropic, OpenAI, Ollama)
+- **Ollama integration** - Pull models, see installed
+- **Model Hierarchy** - Assign models to roles (Primary, Coding, Research, Vision, Fast)
+- Quick presets for common setups
 
 ### 📊 Dashboard
-- Live gateway status
-- Recent activity feed
-- Usage & cost tracking
-- Quick actions
+- Gateway connection status
+- Live stats (sessions, cron jobs, memory backend)
+- Service health (Ollama, N8N)
+- Quick action tiles
 
-### 🛒 Skills Marketplace
-- Browse community skills
-- One-click install
-- Manage installed skills
+### 🛠️ More Pages
+- **Memory** - View/edit files, semantic search (QMD)
+- **Sessions** - Active conversations
+- **Cron** - Scheduled jobs
+- **Nodes** - Paired devices
+- **Skills** - Browse & install from OpenClaw repo
+- **Integrations** - N8N workflows, MCP tools, network scan
+- **Logs** - Session transcripts with filtering
+- **Settings** - Identity, Channels, API Keys, Gateway config
+
+### 🎨 UI Features
+- **Dark/Light theme** toggle
+- **PWA support** - Add to home screen
+- **Mobile responsive** - Works on phones
+- Smooth animations (Framer Motion)
 
 ## Quick Start
 
 ```bash
-# Clone the repo
 git clone https://github.com/jorge123255/openclawui.git
 cd openclawui
-
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
 
+**Requirements:**
+- Node.js 18+
+- OpenClaw/Clawdbot running locally
+- Gateway at default port (18789)
+
 ## Tech Stack
 
-- **Framework:** Next.js 14 (App Router)
-- **Styling:** Tailwind CSS
-- **Components:** Radix UI primitives
-- **State:** Zustand
-- **Animations:** Framer Motion
+- **Next.js 14** (App Router)
+- **Tailwind CSS** + CSS variables for theming
+- **Framer Motion** for animations
+- **Lucide React** for icons
 
 ## Project Structure
 
 ```
-openclawui/
-├── app/
-│   ├── page.tsx              # Landing/Dashboard
-│   ├── setup/
-│   │   └── page.tsx          # Setup wizard
-│   ├── models/
-│   │   └── page.tsx          # AI model management
-│   ├── integrations/
-│   │   └── page.tsx          # Connections hub
-│   ├── skills/
-│   │   └── page.tsx          # Skills marketplace
-│   └── settings/
-│       └── page.tsx          # Settings
-├── components/
-│   ├── ui/                   # Base UI components
-│   ├── setup/                # Setup wizard components
-│   ├── models/               # Model management
-│   └── layout/               # Layout components
-├── lib/
-│   ├── api/                  # API clients
-│   ├── hooks/                # Custom hooks
-│   └── utils/                # Utilities
-└── store/
-    └── index.ts              # Zustand store
+app/
+├── page.tsx           # Dashboard
+├── chat/              # Chat interface
+├── connections/       # Service connections
+├── memory/            # Memory viewer/search
+├── models/            # AI model config
+├── sessions/          # Session list
+├── cron/              # Cron jobs
+├── nodes/             # Paired devices
+├── skills/            # Skill browser
+├── integrations/      # N8N, MCP, services
+├── logs/              # Session transcripts
+├── settings/          # All settings
+├── setup/             # First-run wizard
+└── api/               # API routes (call clawdbot CLI)
 ```
+
+## API Routes
+
+The UI calls the `clawdbot` CLI for most operations:
+
+| Route | Purpose |
+|-------|---------|
+| `/api/gateway` | Config get/patch, start/stop |
+| `/api/sessions` | List sessions |
+| `/api/cron` | List cron jobs |
+| `/api/nodes` | List nodes |
+| `/api/memory` | Memory files, search, settings |
+| `/api/chat` | Send messages |
+| `/api/connections/*` | Check/setup service connections |
+| `/api/ollama` | Ollama models |
+| `/api/skills` | Fetch skills from GitHub |
 
 ## Screenshots
 
-### Setup Wizard
-![Setup](./docs/setup.png)
-
-### Model Management
-![Models](./docs/models.png)
-
-### Integrations
-![Integrations](./docs/integrations.png)
-
-## Contributing
-
-PRs welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md)
+Coming soon - run locally to see!
 
 ## License
 
@@ -122,4 +115,4 @@ MIT
 
 ---
 
-Built with ❤️ for the OpenClaw community
+Built for the OpenClaw community 🦞
