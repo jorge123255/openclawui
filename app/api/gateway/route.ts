@@ -7,13 +7,13 @@ import { readFile } from "fs/promises";
 
 const execAsync = promisify(exec);
 
-// OpenClaw CLI path - check common locations
-const OPENCLAW_CLI = join(homedir(), "clawdbot-fix", "openclaw.mjs");
-const OPENCLAW_CONFIG = join(homedir(), ".openclaw", "openclaw.json");
+// Clawdbot CLI - installed globally
+const CLAWDBOT_CLI = "/usr/local/bin/clawdbot";
+const CLAWDBOT_CONFIG = join(homedir(), ".clawdbot", "clawdbot.json");
 
-// Wrapper to run openclaw commands
-function openclaw(args: string): string {
-  return `node "${OPENCLAW_CLI}" ${args}`;
+// Wrapper to run clawdbot commands
+function clawdbot(args: string): string {
+  return `${CLAWDBOT_CLI} ${args}`;
 }
 
 const execEnv = { 
@@ -21,7 +21,7 @@ const execEnv = {
 };
 
 export async function POST(request: Request) {
-  const { action, config } = await request.json();
+  const { action, config, restart } = await request.json();
 
   try {
     switch (action) {
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       case "stop":
         return await stopGateway();
       case "config-patch":
-        return await patchConfig(config);
+        return await patchConfig(config, restart);
       case "config-get":
         return await getConfig();
       case "check-configured":
@@ -50,24 +50,26 @@ export async function POST(request: Request) {
 
 async function getStatus() {
   try {
-    const { stdout } = await execAsync(openclaw("gateway status --json"), { timeout: 5000, env: execEnv });
+    const { stdout } = await execAsync(clawdbot("gateway status --json"), { timeout: 5000, env: execEnv });
     const status = JSON.parse(stdout);
     return NextResponse.json({ running: true, ...status });
   } catch (e: any) {
-    // Check if gateway process exists
+    // Check if gateway process exists (pgrep unreliable on macOS)
     try {
-      await execAsync("pgrep -f 'openclaw-gateway'");
-      return NextResponse.json({ running: true, status: "running" });
-    } catch {
-      return NextResponse.json({ running: false, status: "stopped" });
-    }
+      const { stdout } = await execAsync("ps aux | grep -c '[c]lawdbot.*gateway\\|[o]penclaw.*gateway'", { timeout: 2000 });
+      const count = parseInt(stdout.trim());
+      if (count > 0) {
+        return NextResponse.json({ running: true, status: "running" });
+      }
+    } catch {}
+    return NextResponse.json({ running: false, status: "stopped" });
   }
 }
 
 async function startGateway() {
   try {
     // Start in background
-    await execAsync(`nohup ${openclaw("gateway start")} > /dev/null 2>&1 &`, { env: execEnv });
+    await execAsync(`nohup ${clawdbot("gateway start")} > /dev/null 2>&1 &`, { env: execEnv });
     
     // Wait a bit and check status
     await new Promise(resolve => setTimeout(resolve, 2000));
@@ -84,12 +86,12 @@ async function startGateway() {
 
 async function stopGateway() {
   try {
-    await execAsync(openclaw("gateway stop"), { timeout: 10000, env: execEnv });
+    await execAsync(clawdbot("gateway stop"), { timeout: 10000, env: execEnv });
     return NextResponse.json({ success: true, running: false });
   } catch (error: any) {
     // Try pkill as fallback
     try {
-      await execAsync("pkill -f 'openclaw-gateway'");
+      await execAsync("pkill -f 'clawdbot.*gateway\\|openclaw.*gateway'");
       return NextResponse.json({ success: true, running: false });
     } catch {
       return NextResponse.json({
@@ -100,15 +102,24 @@ async function stopGateway() {
   }
 }
 
-async function patchConfig(config: Record<string, any>) {
+async function patchConfig(config: Record<string, any>, restart = false) {
   try {
-    // Use openclaw config set for each key
+    // Use clawdbot config set for each key
     for (const [key, value] of Object.entries(config)) {
       const valueStr = typeof value === "string" ? value : JSON.stringify(value);
-      await execAsync(openclaw(`config set "${key}" "${valueStr.replace(/"/g, '\\"')}"`), { timeout: 5000, env: execEnv });
+      await execAsync(clawdbot(`config set "${key}" '${valueStr.replace(/'/g, "'\\''")}'`), { timeout: 5000, env: execEnv });
     }
     
-    return NextResponse.json({ success: true });
+    // Restart gateway if requested (needed for model changes)
+    if (restart) {
+      try {
+        await execAsync(clawdbot("gateway restart"), { timeout: 15000, env: execEnv });
+      } catch (e) {
+        // Restart might timeout but still work - ignore
+      }
+    }
+    
+    return NextResponse.json({ success: true, restarted: restart });
   } catch (error: any) {
     return NextResponse.json({
       success: false,
@@ -120,7 +131,7 @@ async function patchConfig(config: Record<string, any>) {
 async function getConfig() {
   try {
     // Read the config file directly
-    const configData = await readFile(OPENCLAW_CONFIG, "utf-8");
+    const configData = await readFile(CLAWDBOT_CONFIG, "utf-8");
     return NextResponse.json({ config: JSON.parse(configData) });
   } catch (error: any) {
     return NextResponse.json({
@@ -147,7 +158,7 @@ async function checkConfigured() {
 
   try {
     // Check if config file exists and read it
-    const configData = await readFile(OPENCLAW_CONFIG, "utf-8");
+    const configData = await readFile(CLAWDBOT_CONFIG, "utf-8");
     const config = JSON.parse(configData);
     checks.configExists = true;
 

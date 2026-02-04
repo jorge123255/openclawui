@@ -161,6 +161,7 @@ export default function ModelsPage() {
         body: JSON.stringify({
           action: "config-patch",
           config: { "agents.defaults.model.primary": modelId },
+          restart: true, // Restart gateway for model changes to take effect
         }),
       });
       setPrimaryModel(modelId);
@@ -294,6 +295,7 @@ export default function ModelsPage() {
                 body: JSON.stringify({
                   action: "config-patch",
                   config: { "agents.defaults.model.subagent": modelId },
+                  restart: true,
                 }),
               });
               setSubagentModel(modelId);
@@ -683,6 +685,7 @@ function ModelHierarchy({
         body: JSON.stringify({
           action: "config-patch",
           config: { "agents.defaults.model.hierarchy": newSlots },
+          // No restart needed - hierarchy is read at subagent spawn time
         }),
       });
       setSlots(newSlots);
