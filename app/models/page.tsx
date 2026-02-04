@@ -17,6 +17,10 @@ import {
   Plus,
   Trash2,
   ExternalLink,
+  Download,
+  Search,
+  Library,
+  X,
 } from "lucide-react";
 
 interface Model {
@@ -52,7 +56,8 @@ export default function ModelsPage() {
   const [saving, setSaving] = useState(false);
   const [pullModel, setPullModel] = useState("");
   const [pulling, setPulling] = useState(false);
-  const [activeTab, setActiveTab] = useState<"models" | "hierarchy">("models");
+  const [pullingModel, setPullingModel] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"models" | "browse" | "hierarchy">("models");
 
   useEffect(() => {
     loadConfig();
@@ -236,21 +241,32 @@ export default function ModelsPage() {
       </header>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-border pb-2">
+      <div className="flex gap-2 mb-6 border-b border-border pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab("models")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
             activeTab === "models"
               ? "bg-primary text-primary-foreground"
               : "hover:bg-secondary"
           }`}
         >
           <Cpu className="w-4 h-4" />
-          Models
+          Installed
+        </button>
+        <button
+          onClick={() => setActiveTab("browse")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
+            activeTab === "browse"
+              ? "bg-primary text-primary-foreground"
+              : "hover:bg-secondary"
+          }`}
+        >
+          <Library className="w-4 h-4" />
+          Browse Library
         </button>
         <button
           onClick={() => setActiveTab("hierarchy")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${
             activeTab === "hierarchy"
               ? "bg-primary text-primary-foreground"
               : "hover:bg-secondary"
@@ -286,6 +302,31 @@ export default function ModelsPage() {
             setSaving(false);
           }}
           saving={saving}
+        />
+      ) : activeTab === "browse" ? (
+        <OllamaLibrary
+          ollamaUrl={ollamaUrl}
+          installedModels={ollamaModels.map(m => m.name)}
+          onInstall={async (modelName) => {
+            setPullingModel(modelName);
+            try {
+              const res = await fetch("/api/ollama", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "pull", url: ollamaUrl, model: modelName }),
+              });
+              const data = await res.json();
+              if (data.success) {
+                checkOllama(ollamaUrl);
+              } else {
+                alert(`Failed to pull ${modelName}: ${data.error}`);
+              }
+            } catch (e: any) {
+              alert(`Error pulling ${modelName}: ${e.message}`);
+            }
+            setPullingModel(null);
+          }}
+          pullingModel={pullingModel}
         />
       ) : (
         <>
@@ -835,6 +876,234 @@ function ModelHierarchy({
             <p className="text-center text-muted-foreground py-2">No additional roles configured</p>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Ollama Library Browser Component
+interface LibraryModel {
+  name: string;
+  description: string;
+  size: string;
+  pulls: string;
+  tags: string[];
+  updated: string;
+  capabilities: string[];
+}
+
+interface LibraryCategory {
+  id: string;
+  name: string;
+  emoji: string;
+}
+
+function OllamaLibrary({
+  ollamaUrl,
+  installedModels,
+  onInstall,
+  pullingModel,
+}: {
+  ollamaUrl: string;
+  installedModels: string[];
+  onInstall: (modelName: string) => void;
+  pullingModel: string | null;
+}) {
+  const [models, setModels] = useState<LibraryModel[]>([]);
+  const [categories, setCategories] = useState<LibraryCategory[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadLibrary();
+  }, [selectedCategory]);
+
+  async function loadLibrary() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedCategory !== "all") params.set("category", selectedCategory);
+      if (searchQuery) params.set("search", searchQuery);
+      
+      const res = await fetch(`/api/ollama/library?${params}`);
+      const data = await res.json();
+      setModels(data.models || []);
+      setCategories(data.categories || []);
+    } catch (e) {
+      console.error("Failed to load library:", e);
+    }
+    setLoading(false);
+  }
+
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadLibrary();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  function isInstalled(modelName: string): boolean {
+    // Check if any installed model matches (with or without tag)
+    return installedModels.some(m => 
+      m === modelName || 
+      m.startsWith(modelName + ":") ||
+      modelName.startsWith(m.split(":")[0])
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Search and Filter */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search models..."
+            className="w-full pl-10 pr-4 py-3 bg-secondary rounded-xl border border-border focus:border-primary outline-none"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-background rounded"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Category Pills */}
+      <div className="flex flex-wrap gap-2">
+        {categories.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => setSelectedCategory(cat.id)}
+            className={`px-4 py-2 rounded-full text-sm transition-colors ${
+              selectedCategory === cat.id
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary hover:bg-secondary/80"
+            }`}
+          >
+            {cat.emoji} {cat.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Models Grid */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : models.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          No models found
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {models.map((model) => {
+            const installed = isInstalled(model.name);
+            const isPulling = pullingModel === model.name;
+            
+            return (
+              <motion.div
+                key={model.name}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`p-4 rounded-xl border-2 transition-all ${
+                  installed
+                    ? "border-accent/50 bg-accent/10"
+                    : "border-border hover:border-primary/50"
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold truncate flex items-center gap-2">
+                      🦙 {model.name}
+                      {installed && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                          Installed
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                      {model.description}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap gap-1 mt-3 mb-3">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-secondary">
+                    {model.size}
+                  </span>
+                  {model.capabilities.includes("vision") && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+                      👁️ Vision
+                    </span>
+                  )}
+                  {model.capabilities.includes("code") && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
+                      💻 Code
+                    </span>
+                  )}
+                  {model.capabilities.includes("reasoning") && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">
+                      🤔 Reasoning
+                    </span>
+                  )}
+                  {model.capabilities.includes("embedding") && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">
+                      📊 Embedding
+                    </span>
+                  )}
+                </div>
+                
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {model.pulls} pulls
+                  </span>
+                  
+                  {installed ? (
+                    <span className="flex items-center gap-1 text-sm text-accent">
+                      <Check className="w-4 h-4" />
+                      Ready
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onInstall(model.name)}
+                      disabled={isPulling}
+                      className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+                    >
+                      {isPulling ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Pulling...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Install
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Help Text */}
+      <div className="p-4 rounded-xl bg-secondary/30 text-sm text-muted-foreground">
+        <p>
+          💡 Models are pulled from your Ollama server at <code className="bg-background px-1 rounded">{ollamaUrl}</code>.
+          Large models may take several minutes to download.
+        </p>
       </div>
     </div>
   );
