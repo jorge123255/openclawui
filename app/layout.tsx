@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
+import MobileNav from "@/components/MobileNav";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -31,8 +32,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-background text-foreground min-h-screen`}>
+      <body className={`${inter.className} bg-background text-foreground min-h-screen pb-16 md:pb-0`}>
         {children}
+        <MobileNav />
         <Toaster
           position="bottom-right"
           toastOptions={{

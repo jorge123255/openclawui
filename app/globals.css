@@ -96,3 +96,8 @@
     min-height: 44px;
   }
 }
+
+/* Safe area for iOS notch/home indicator */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

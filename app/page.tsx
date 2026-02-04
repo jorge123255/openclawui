@@ -19,6 +19,11 @@ import {
   MessageCircle,
   Sun,
   Moon,
+  Mail,
+  Calendar,
+  Github,
+  CheckSquare,
+  LayoutGrid,
 } from "lucide-react";
 
 interface GatewayStatus {
@@ -55,6 +60,107 @@ function ChatHero() {
         <ChevronRight className="w-6 h-6 text-gray-400 group-hover:text-blue-400 group-hover:translate-x-1 transition-all" />
       </div>
     </Link>
+  );
+}
+
+interface WidgetData {
+  email?: { unread: number; latest?: string };
+  calendar?: { today: number; next?: string };
+  github?: { notifications: number; prs?: number };
+  tasks?: { pending: number; today?: number };
+}
+
+function ConnectionWidgets() {
+  const [data, setData] = useState<WidgetData>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadWidgets() {
+      try {
+        const res = await fetch("/api/widgets");
+        const json = await res.json();
+        if (json.success) {
+          setData(json.data || {});
+        }
+      } catch {}
+      setLoading(false);
+    }
+    loadWidgets();
+    // Refresh every 5 minutes
+    const interval = setInterval(loadWidgets, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="p-4 rounded-xl bg-secondary/30 border border-border animate-pulse h-24" />
+        ))}
+      </div>
+    );
+  }
+
+  const widgets = [
+    {
+      id: "email",
+      icon: Mail,
+      label: "Emails",
+      value: data.email?.unread ?? "—",
+      sub: data.email?.latest || "Connect Google",
+      color: "text-red-400",
+      href: "/email",
+      bg: "from-red-500/20 to-red-500/5",
+    },
+    {
+      id: "calendar",
+      icon: Calendar,
+      label: "Today",
+      value: data.calendar?.today ?? "—",
+      sub: data.calendar?.next || "Connect Calendar",
+      color: "text-blue-400",
+      href: "/calendar",
+      bg: "from-blue-500/20 to-blue-500/5",
+    },
+    {
+      id: "github",
+      icon: Github,
+      label: "GitHub",
+      value: data.github?.notifications ?? "—",
+      sub: data.github?.prs ? `${data.github.prs} open PRs` : "Connect GitHub",
+      color: "text-gray-400",
+      href: "/github",
+      bg: "from-gray-500/20 to-gray-500/5",
+    },
+    {
+      id: "tasks",
+      icon: CheckSquare,
+      label: "Tasks",
+      value: data.tasks?.pending ?? "—",
+      sub: data.tasks?.today ? `${data.tasks.today} due today` : "Connect Tasks",
+      color: "text-orange-400",
+      href: "/connections",
+      bg: "from-orange-500/20 to-orange-500/5",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      {widgets.map((w) => (
+        <Link
+          key={w.id}
+          href={w.href}
+          className={`p-4 rounded-xl bg-gradient-to-br ${w.bg} border border-white/10 hover:border-white/20 transition-all group`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <w.icon className={`w-5 h-5 ${w.color}`} />
+            <span className={`text-2xl font-bold ${w.color}`}>{w.value}</span>
+          </div>
+          <div className="text-sm font-medium">{w.label}</div>
+          <div className="text-xs text-muted-foreground truncate">{w.sub}</div>
+        </Link>
+      ))}
+    </div>
   );
 }
 
@@ -205,6 +311,9 @@ export default function Home() {
 
       {/* Chat Hero */}
       <ChatHero />
+
+      {/* Connection Widgets */}
+      <ConnectionWidgets />
 
       {/* Live Stats */}
       {stats && (
