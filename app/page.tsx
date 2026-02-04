@@ -311,6 +311,13 @@ export default function Home() {
           description="Session transcripts"
           color="green"
         />
+        <QuickAction
+          href="/connections"
+          icon={Plug}
+          title="Connections"
+          description="Email, Calendar, GitHub"
+          color="red"
+        />
       </div>
 
       {/* Reset Config Banner */}
