@@ -1,5 +1,1 @@
-{
-  "/setup/page": "app/setup/page.js",
-  "/api/gateway/route": "app/api/gateway/route.js",
-  "/api/install/route": "app/api/install/route.js"
-}
+{}

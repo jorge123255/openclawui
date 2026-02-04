@@ -14,6 +14,7 @@ import {
   Zap,
   Shield,
   MessageSquare,
+  Loader2,
 } from "lucide-react";
 
 interface GatewayStatus {
@@ -26,27 +27,79 @@ export default function Home() {
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>({
     connected: false,
   });
-  const [isFirstRun, setIsFirstRun] = useState(true);
+  const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null); // null = loading
+  const [systemStatus, setSystemStatus] = useState({
+    ollama: "detecting" as "online" | "offline" | "detecting",
+    telegram: "detecting" as "online" | "offline" | "detecting",
+  });
 
   useEffect(() => {
     // Check if setup is complete
     const setupComplete = localStorage.getItem("setupComplete");
     setIsFirstRun(!setupComplete);
 
-    // Check gateway status
-    checkGatewayStatus();
+    if (setupComplete) {
+      // Check gateway status
+      checkGatewayStatus();
+      // Check other services
+      checkSystemStatus();
+    }
   }, []);
 
   async function checkGatewayStatus() {
     try {
-      const res = await fetch("/api/gateway/status");
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status" }),
+      });
       if (res.ok) {
         const data = await res.json();
-        setGatewayStatus({ connected: true, ...data });
+        setGatewayStatus({ connected: data.running, ...data });
       }
     } catch {
       setGatewayStatus({ connected: false });
     }
+  }
+
+  async function checkSystemStatus() {
+    // Check config for channel status
+    try {
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "config-get" }),
+      });
+      const data = await res.json();
+      if (data.config) {
+        // Check Telegram
+        const telegramToken = data.config?.channels?.telegram?.botToken;
+        setSystemStatus(prev => ({
+          ...prev,
+          telegram: telegramToken ? "online" : "offline",
+        }));
+        
+        // Check Ollama
+        const ollamaUrl = data.config?.models?.providers?.ollama?.baseUrl || "http://localhost:11434";
+        try {
+          await fetch(ollamaUrl.replace("/v1", "") + "/api/tags", { mode: "no-cors" });
+          setSystemStatus(prev => ({ ...prev, ollama: "online" }));
+        } catch {
+          setSystemStatus(prev => ({ ...prev, ollama: "offline" }));
+        }
+      }
+    } catch {
+      setSystemStatus({ ollama: "offline", telegram: "offline" });
+    }
+  }
+
+  // Loading state - prevent flash
+  if (isFirstRun === null) {
+    return (
+      <main className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </main>
+    );
   }
 
   // Show setup wizard for first-time users
@@ -198,8 +251,8 @@ export default function Home() {
               label="Gateway"
               status={gatewayStatus.connected ? "online" : "offline"}
             />
-            <StatusRow label="Ollama" status="detecting" />
-            <StatusRow label="Telegram" status="online" />
+            <StatusRow label="Ollama" status={systemStatus.ollama} />
+            <StatusRow label="Telegram" status={systemStatus.telegram} />
           </div>
 
           <div className="mt-6 pt-6 border-t border-border">
