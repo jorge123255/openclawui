@@ -29,6 +29,8 @@ type DetectionState = {
   anthropicAuth: boolean;
   openaiAuth: boolean;
   ollamaRunning: boolean;
+  telegramConfigured: boolean;
+  discordConfigured: boolean;
 };
 
 export default function SetupPage() {
@@ -41,6 +43,8 @@ export default function SetupPage() {
     anthropicAuth: false,
     openaiAuth: false,
     ollamaRunning: false,
+    telegramConfigured: false,
+    discordConfigured: false,
   });
   const [config, setConfig] = useState({
     deployment: "local" as const,
@@ -122,6 +126,28 @@ export default function SetupPage() {
         results.ollamaRunning = false;
       }
 
+      // Check existing channel config
+      try {
+        const res = await fetch("/api/gateway", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "config-get" }),
+        });
+        const data = await res.json();
+        if (data.config) {
+          // Check Telegram
+          const telegramToken = data.config?.channels?.telegram?.botToken;
+          results.telegramConfigured = !!(telegramToken && telegramToken.length > 10);
+          
+          // Check Discord
+          const discordToken = data.config?.channels?.discord?.token;
+          results.discordConfigured = !!(discordToken && discordToken.length > 10);
+        }
+      } catch {
+        results.telegramConfigured = false;
+        results.discordConfigured = false;
+      }
+
       setDetection(results as DetectionState);
 
       // Auto-select provider if one is authenticated
@@ -131,6 +157,13 @@ export default function SetupPage() {
         setConfig(c => ({ ...c, aiProvider: "openai" }));
       } else if (results.ollamaRunning) {
         setConfig(c => ({ ...c, aiProvider: "ollama" }));
+      }
+
+      // Auto-select channel if one is configured
+      if (results.telegramConfigured) {
+        setConfig(c => ({ ...c, channel: "telegram" }));
+      } else if (results.discordConfigured) {
+        setConfig(c => ({ ...c, channel: "discord" }));
       }
 
       // Skip to appropriate step if already set up
@@ -190,16 +223,13 @@ export default function SetupPage() {
       </header>
 
       {/* Detection Banner */}
-      {detection.checked && (detection.openclawInstalled || detection.anthropicAuth || detection.openaiAuth || detection.ollamaRunning || detection.gatewayRunning) && (
+      {detection.checked && (detection.openclawInstalled || detection.anthropicAuth || detection.openaiAuth || detection.ollamaRunning || detection.gatewayRunning || detection.telegramConfigured || detection.discordConfigured) && (
         <div className="mx-6 mt-4 p-4 rounded-xl bg-accent/10 border border-accent/30">
           <div className="flex items-center gap-2 mb-2">
             <CheckCircle2 className="w-5 h-5 text-accent" />
             <span className="font-medium">Existing setup detected!</span>
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
-            {detection.openclawInstalled && (
-              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ OpenClaw</span>
-            )}
             {detection.gatewayRunning && (
               <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Gateway Running</span>
             )}
@@ -209,8 +239,11 @@ export default function SetupPage() {
             {detection.openaiAuth && (
               <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ OpenAI Auth</span>
             )}
-            {detection.ollamaRunning && (
-              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Ollama</span>
+            {detection.telegramConfigured && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Telegram</span>
+            )}
+            {detection.discordConfigured && (
+              <span className="px-2 py-1 rounded-full bg-accent/20 text-accent">✓ Discord</span>
             )}
           </div>
         </div>
@@ -239,6 +272,7 @@ export default function SetupPage() {
             <StepChannels
               key="channels"
               config={config}
+              detection={detection}
               onChange={(updates) => setConfig({ ...config, ...updates })}
             />
           )}
@@ -805,9 +839,11 @@ function StepAI({
 
 function StepChannels({
   config,
+  detection,
   onChange,
 }: {
   config: any;
+  detection: DetectionState;
   onChange: (updates: any) => void;
 }) {
   const channels = [
@@ -816,13 +852,15 @@ function StepChannels({
       name: "Telegram", 
       icon: "📱",
       description: "Easiest to set up",
-      recommended: true
+      recommended: true,
+      configured: detection.telegramConfigured
     },
     { 
       id: "discord", 
       name: "Discord", 
       icon: "🎮",
-      description: "Great for servers"
+      description: "Great for servers",
+      configured: detection.discordConfigured
     },
   ];
 
@@ -847,9 +885,14 @@ function StepChannels({
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold">{c.name}</h3>
-                    {c.recommended && (
+                    {c.recommended && !c.configured && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
                         Recommended
+                      </span>
+                    )}
+                    {c.configured && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent">
+                        ✓ Configured
                       </span>
                     )}
                   </div>
@@ -862,7 +905,24 @@ function StepChannels({
             </button>
 
             {/* Telegram Setup */}
-            {config.channel === "telegram" && c.id === "telegram" && (
+            {config.channel === "telegram" && c.id === "telegram" && c.configured && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-accent/10 border border-accent/30"
+              >
+                <div className="flex items-center gap-2 text-accent">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span className="font-medium">Telegram is already configured</span>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Your existing bot token will be used. You can update it in Settings later.
+                </p>
+              </motion.div>
+            )}
+
+            {/* Telegram Setup - New Config */}
+            {config.channel === "telegram" && c.id === "telegram" && !c.configured && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -906,8 +966,25 @@ function StepChannels({
               </motion.div>
             )}
 
-            {/* Discord Setup */}
-            {config.channel === "discord" && c.id === "discord" && (
+            {/* Discord Setup - Already Configured */}
+            {config.channel === "discord" && c.id === "discord" && c.configured && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="mt-3 p-4 rounded-xl bg-accent/10 border border-accent/30"
+              >
+                <div className="flex items-center gap-2 text-accent">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span className="font-medium">Discord is already configured</span>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Your existing bot token will be used. You can update it in Settings later.
+                </p>
+              </motion.div>
+            )}
+
+            {/* Discord Setup - New Config */}
+            {config.channel === "discord" && c.id === "discord" && !c.configured && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
