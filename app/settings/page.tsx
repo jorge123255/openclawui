@@ -18,21 +18,54 @@ import {
   RefreshCw,
   Trash2,
   Plus,
+  User,
 } from "lucide-react";
 
-type Tab = "channels" | "api-keys" | "gateway" | "advanced";
+type Tab = "identity" | "channels" | "api-keys" | "gateway" | "advanced";
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>("channels");
+  const [activeTab, setActiveTab] = useState<Tab>("identity");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<any>({});
   const [changes, setChanges] = useState<Record<string, any>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const [assistant, setAssistant] = useState({ name: "", avatar: "" });
+  const [savingAssistant, setSavingAssistant] = useState(false);
 
   useEffect(() => {
     loadConfig();
+    loadAssistant();
   }, []);
+
+  async function loadAssistant() {
+    try {
+      const res = await fetch("/api/assistant");
+      const data = await res.json();
+      setAssistant({ name: data.name || "", avatar: data.avatar || "🤖" });
+    } catch {}
+  }
+
+  async function saveAssistant() {
+    if (!assistant.name) return;
+    setSavingAssistant(true);
+    try {
+      const res = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(assistant),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Assistant identity saved!");
+      } else {
+        alert("Error: " + data.error);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+    setSavingAssistant(false);
+  }
 
   async function loadConfig() {
     setLoading(true);
@@ -91,6 +124,7 @@ export default function SettingsPage() {
   }
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
+    { id: "identity", label: "Identity", icon: User },
     { id: "channels", label: "Channels", icon: MessageSquare },
     { id: "api-keys", label: "API Keys", icon: Key },
     { id: "gateway", label: "Gateway", icon: Server },
@@ -179,6 +213,72 @@ export default function SettingsPage() {
 
       {/* Content */}
       <div className="max-w-3xl">
+        {activeTab === "identity" && (
+          <div className="space-y-6">
+            <div className="p-6 rounded-xl bg-secondary/50 border border-border">
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <User className="w-5 h-5" />
+                Assistant Identity
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                Customize your assistant's name and avatar. This appears in the chat interface and throughout the UI.
+              </p>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Name</label>
+                  <input
+                    type="text"
+                    value={assistant.name}
+                    onChange={(e) => setAssistant({ ...assistant, name: e.target.value })}
+                    placeholder="e.g., Bob, Jarvis, Friday"
+                    className="w-full px-4 py-2 rounded-lg bg-background border border-border focus:outline-none focus:border-primary"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">Avatar (emoji or short text)</label>
+                  <input
+                    type="text"
+                    value={assistant.avatar}
+                    onChange={(e) => setAssistant({ ...assistant, avatar: e.target.value })}
+                    placeholder="e.g., 🤖, 🦾, CB"
+                    className="w-full px-4 py-2 rounded-lg bg-background border border-border focus:outline-none focus:border-primary"
+                    maxLength={4}
+                  />
+                </div>
+
+                <div className="flex items-center gap-4 mt-6">
+                  <div className="flex items-center gap-3 p-4 rounded-lg bg-background border border-border">
+                    <div className="text-3xl">{assistant.avatar || "🤖"}</div>
+                    <div>
+                      <div className="font-semibold">{assistant.name || "Assistant"}</div>
+                      <div className="text-xs text-muted-foreground">Preview</div>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={saveAssistant}
+                    disabled={savingAssistant || !assistant.name}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {savingAssistant ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save Identity
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 text-sm">
+              <strong>Tip:</strong> Common emoji avatars: 🤖 🦾 🧠 💬 ⚡ 🎯 🔮 👾
+            </div>
+          </div>
+        )}
+
         {activeTab === "channels" && (
           <ChannelsTab
             config={config}

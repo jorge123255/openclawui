@@ -56,6 +56,13 @@ function ChatHero() {
   );
 }
 
+interface DashboardStats {
+  sessions: { count: number; active: number };
+  cron: { count: number; enabled: number };
+  memory: { backend: string; qmdEnabled: boolean };
+  services: { ollama?: string; n8n?: string };
+}
+
 export default function Home() {
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>({
     connected: false,
@@ -65,6 +72,7 @@ export default function Home() {
     ollama: "detecting" as "online" | "offline" | "detecting",
     telegram: "detecting" as "online" | "offline" | "detecting",
   });
+  const [stats, setStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
     // Check if setup is complete
@@ -76,6 +84,11 @@ export default function Home() {
       checkGatewayStatus();
       // Check other services
       checkSystemStatus();
+      // Load dashboard stats
+      loadStats();
+      // Refresh stats every 30 seconds
+      const interval = setInterval(loadStats, 30000);
+      return () => clearInterval(interval);
     }
   }, []);
 
@@ -126,6 +139,28 @@ export default function Home() {
     }
   }
 
+  async function loadStats() {
+    try {
+      const res = await fetch("/api/status");
+      if (res.ok) {
+        const data = await res.json();
+        setStats({
+          sessions: data.sessions || { count: 0, active: 0 },
+          cron: data.cron || { count: 0, enabled: 0 },
+          memory: data.memory || { backend: "sqlite", qmdEnabled: false },
+          services: data.services || {},
+        });
+        // Update service status from stats
+        if (data.services) {
+          setSystemStatus((prev) => ({
+            ...prev,
+            ollama: data.services.ollama || prev.ollama,
+          }));
+        }
+      }
+    } catch {}
+  }
+
   // Loading state - prevent flash
   if (isFirstRun === null) {
     return (
@@ -167,6 +202,38 @@ export default function Home() {
 
       {/* Chat Hero */}
       <ChatHero />
+
+      {/* Live Stats */}
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="p-4 rounded-xl bg-secondary/50 border border-border">
+            <div className="text-2xl font-bold text-blue-400">{stats.sessions.count}</div>
+            <div className="text-sm text-muted-foreground">Sessions</div>
+            <div className="text-xs text-green-400">{stats.sessions.active} active</div>
+          </div>
+          <div className="p-4 rounded-xl bg-secondary/50 border border-border">
+            <div className="text-2xl font-bold text-orange-400">{stats.cron.enabled}</div>
+            <div className="text-sm text-muted-foreground">Cron Jobs</div>
+            <div className="text-xs text-gray-500">{stats.cron.count} total</div>
+          </div>
+          <div className="p-4 rounded-xl bg-secondary/50 border border-border">
+            <div className="text-2xl font-bold text-purple-400">{stats.memory.qmdEnabled ? "QMD" : "SQLite"}</div>
+            <div className="text-sm text-muted-foreground">Memory Backend</div>
+            <div className="text-xs text-green-400">{stats.memory.qmdEnabled ? "Hybrid search" : "Vector search"}</div>
+          </div>
+          <div className="p-4 rounded-xl bg-secondary/50 border border-border">
+            <div className="flex items-center gap-2">
+              <div className={`w-3 h-3 rounded-full ${stats.services.ollama === "online" ? "bg-green-500" : "bg-red-500"}`} />
+              <span className="text-sm">Ollama</span>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <div className={`w-3 h-3 rounded-full ${stats.services.n8n === "online" ? "bg-green-500" : "bg-red-500"}`} />
+              <span className="text-sm">N8N</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">Services</div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions - Row 1 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
@@ -229,6 +296,17 @@ export default function Home() {
           title="Memory"
           description="View & search memories"
           color="purple"
+        />
+      </div>
+
+      {/* Quick Actions - Row 3 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <QuickAction
+          href="/logs"
+          icon={Shield}
+          title="Logs"
+          description="Session transcripts"
+          color="green"
         />
       </div>
 
