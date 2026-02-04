@@ -474,44 +474,43 @@ export default function ModelsPage() {
           </div>
         ) : ollamaStatus === "online" ? (
           <div className="space-y-4">
-            {/* Pull Model */}
-            <div className="p-4 rounded-xl bg-secondary/50 border border-border">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={pullModel}
-                  onChange={(e) => setPullModel(e.target.value)}
-                  placeholder="Model name (e.g., llama3.2, qwen2.5-coder:32b)"
-                  className="flex-1 px-3 py-2 bg-background rounded-lg border border-border focus:border-primary outline-none text-sm"
-                />
+            {/* Browse Library Button */}
+            <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/20 to-blue-500/20 border border-purple-500/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <Library className="w-5 h-5" />
+                    Want to add more models?
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Browse the Ollama library and install with one click
+                  </p>
+                </div>
                 <button
-                  onClick={pullOllamaModel}
-                  disabled={pulling || !pullModel.trim()}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+                  onClick={() => setActiveTab("browse")}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary-hover rounded-lg font-medium transition-colors"
                 >
-                  {pulling ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Plus className="w-4 h-4" />
-                  )}
-                  Pull Model
+                  <Search className="w-4 h-4" />
+                  Browse Library
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Browse models at{" "}
-                <a href="https://ollama.ai/library" target="_blank" className="text-primary hover:underline">
-                  ollama.ai/library
-                </a>
-              </p>
             </div>
 
             {/* Local Models */}
             {ollamaModels.length === 0 ? (
-              <div className="p-6 rounded-xl bg-secondary/50 text-center">
-                <p className="text-muted-foreground">No models installed yet</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Pull a model above to get started
+              <div className="p-8 rounded-xl bg-secondary/50 text-center">
+                <div className="text-4xl mb-3">🦙</div>
+                <p className="font-medium text-lg">No models installed yet</p>
+                <p className="text-sm text-muted-foreground mt-1 mb-4">
+                  Browse the library to find and install models
                 </p>
+                <button
+                  onClick={() => setActiveTab("browse")}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary-hover rounded-lg font-medium transition-colors"
+                >
+                  <Library className="w-4 h-4" />
+                  Browse Library
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -563,11 +562,14 @@ export default function ModelsPage() {
             <code className="bg-secondary px-1 rounded">codex auth</code> in your terminal
           </p>
           <p>
-            <strong className="text-foreground">Ollama:</strong> Install from{" "}
-            <a href="https://ollama.ai" target="_blank" className="text-primary hover:underline">
-              ollama.ai
-            </a>{" "}
-            then run <code className="bg-secondary px-1 rounded">ollama pull &lt;model&gt;</code>
+            <strong className="text-foreground">Ollama:</strong> Use the{" "}
+            <button 
+              onClick={() => setActiveTab("browse")} 
+              className="text-primary hover:underline font-medium"
+            >
+              Browse Library
+            </button>{" "}
+            tab to discover and install models with one click
           </p>
         </div>
       </section>
