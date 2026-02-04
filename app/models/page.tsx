@@ -57,6 +57,7 @@ export default function ModelsPage() {
   const [pullModel, setPullModel] = useState("");
   const [pulling, setPulling] = useState(false);
   const [pullingModel, setPullingModel] = useState<string | null>(null);
+  const [pullProgress, setPullProgress] = useState<{ status: string; percent: number } | null>(null);
   const [activeTab, setActiveTab] = useState<"models" | "browse" | "hierarchy">("models");
 
   useEffect(() => {
@@ -309,24 +310,61 @@ export default function ModelsPage() {
           installedModels={ollamaModels.map(m => m.name)}
           onInstall={async (modelName) => {
             setPullingModel(modelName);
+            setPullProgress({ status: "Starting...", percent: 0 });
             try {
-              const res = await fetch("/api/ollama", {
+              const res = await fetch("/api/ollama/pull", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "pull", url: ollamaUrl, model: modelName }),
+                body: JSON.stringify({ url: ollamaUrl, model: modelName }),
               });
-              const data = await res.json();
-              if (data.success) {
-                checkOllama(ollamaUrl);
-              } else {
-                alert(`Failed to pull ${modelName}: ${data.error}`);
+              
+              if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.error || "Failed to start pull");
+              }
+              
+              const reader = res.body?.getReader();
+              const decoder = new TextDecoder();
+              
+              if (reader) {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  
+                  const text = decoder.decode(value);
+                  const lines = text.split("\n").filter(l => l.startsWith("data: "));
+                  
+                  for (const line of lines) {
+                    try {
+                      const data = JSON.parse(line.slice(6));
+                      if (data.error) {
+                        throw new Error(data.error);
+                      }
+                      if (data.done) {
+                        setPullProgress({ status: "Complete!", percent: 100 });
+                        checkOllama(ollamaUrl);
+                      } else if (data.status) {
+                        let percent = 0;
+                        if (data.completed && data.total) {
+                          percent = Math.round((data.completed / data.total) * 100);
+                        }
+                        setPullProgress({ 
+                          status: data.status, 
+                          percent: percent || pullProgress?.percent || 0 
+                        });
+                      }
+                    } catch {}
+                  }
+                }
               }
             } catch (e: any) {
               alert(`Error pulling ${modelName}: ${e.message}`);
             }
             setPullingModel(null);
+            setPullProgress(null);
           }}
           pullingModel={pullingModel}
+          pullProgress={pullProgress}
         />
       ) : (
         <>
@@ -905,11 +943,13 @@ function OllamaLibrary({
   installedModels,
   onInstall,
   pullingModel,
+  pullProgress,
 }: {
   ollamaUrl: string;
   installedModels: string[];
   onInstall: (modelName: string) => void;
   pullingModel: string | null;
+  pullProgress: { status: string; percent: number } | null;
 }) {
   const [models, setModels] = useState<LibraryModel[]>([]);
   const [categories, setCategories] = useState<LibraryCategory[]>([]);
@@ -1074,23 +1114,31 @@ function OllamaLibrary({
                       <Check className="w-4 h-4" />
                       Ready
                     </span>
+                  ) : isPulling ? (
+                    <div className="flex-1 ml-4">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-muted-foreground truncate max-w-[150px]">
+                          {pullProgress?.status || "Starting..."}
+                        </span>
+                        <span className="text-primary font-medium">
+                          {pullProgress?.percent || 0}%
+                        </span>
+                      </div>
+                      <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${pullProgress?.percent || 0}%` }}
+                        />
+                      </div>
+                    </div>
                   ) : (
                     <button
                       onClick={() => onInstall(model.name)}
-                      disabled={isPulling}
+                      disabled={!!pullingModel}
                       className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
                     >
-                      {isPulling ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Pulling...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" />
-                          Install
-                        </>
-                      )}
+                      <Download className="w-4 h-4" />
+                      Install
                     </button>
                   )}
                 </div>
