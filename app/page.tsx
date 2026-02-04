@@ -184,22 +184,50 @@ export default function Home() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
   useEffect(() => {
-    // Check if setup is complete
+    // Check if setup is complete - check localStorage first, then verify gateway
     const setupComplete = localStorage.getItem("setupComplete");
-    setIsFirstRun(!setupComplete);
-
+    
     if (setupComplete) {
-      // Check gateway status
+      // Already set up - proceed normally
+      setIsFirstRun(false);
       checkGatewayStatus();
-      // Check other services
       checkSystemStatus();
-      // Load dashboard stats
       loadStats();
-      // Refresh stats every 30 seconds
       const interval = setInterval(loadStats, 30000);
       return () => clearInterval(interval);
+    } else {
+      // No localStorage flag - check if gateway is actually configured
+      // (handles cache clears, different browsers, etc.)
+      checkIfAlreadyConfigured();
     }
   }, []);
+
+  async function checkIfAlreadyConfigured() {
+    try {
+      const res = await fetch("/api/gateway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "status" }),
+      });
+      const data = await res.json();
+      
+      // If gateway is running, setup is already complete
+      if (data.running) {
+        localStorage.setItem("setupComplete", "true");
+        setIsFirstRun(false);
+        setGatewayStatus({ connected: true, ...data });
+        checkSystemStatus();
+        loadStats();
+        const interval = setInterval(loadStats, 30000);
+        return () => clearInterval(interval);
+      } else {
+        setIsFirstRun(true);
+      }
+    } catch {
+      // Gateway check failed - show setup
+      setIsFirstRun(true);
+    }
+  }
 
   async function checkGatewayStatus() {
     try {
