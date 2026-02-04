@@ -33,16 +33,42 @@ export async function POST(request: Request) {
 }
 
 async function checkOpenClaw() {
+  // Method 1: Check for global npm install
   try {
     const { stdout } = await execAsync("openclaw --version");
     return NextResponse.json({
       installed: true,
       version: stdout.trim(),
+      source: "global",
     });
   } catch {
-    return NextResponse.json({
-      installed: false,
-    });
+    // Method 2: Check if gateway is running (indicates OpenClaw is available)
+    try {
+      // Use ps aux | grep which is more reliable on macOS
+      const { stdout } = await execAsync("ps aux | grep '[o]penclaw-gateway' | head -1");
+      if (stdout.trim()) {
+        // Gateway is running, get version from local install
+        try {
+          const { stdout: version } = await execAsync("node ~/clawdbot-fix/openclaw.mjs --version 2>/dev/null");
+          return NextResponse.json({
+            installed: true,
+            version: version.trim(),
+            source: "local",
+          });
+        } catch {
+          return NextResponse.json({
+            installed: true,
+            version: "running",
+            source: "local",
+          });
+        }
+      }
+      throw new Error("Gateway not found");
+    } catch {
+      return NextResponse.json({
+        installed: false,
+      });
+    }
   }
 }
 
