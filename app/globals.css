@@ -4,8 +4,29 @@
 
 @layer base {
   :root {
-    --background: 0 0% 4%;
+    /* Dark mode (default) */
+    --background: 240 10% 4%;
     --foreground: 0 0% 98%;
+    --card: 240 6% 8%;
+    --card-hover: 240 5% 10%;
+    --secondary: 240 4% 16%;
+    --secondary-hover: 240 4% 20%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
+    --border: 240 4% 16%;
+  }
+
+  /* Light mode */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 4%;
+    --card: 0 0% 98%;
+    --card-hover: 0 0% 95%;
+    --secondary: 240 5% 92%;
+    --secondary-hover: 240 5% 88%;
+    --muted: 240 5% 92%;
+    --muted-foreground: 240 4% 46%;
+    --border: 240 6% 85%;
   }
 
   * {
@@ -19,7 +40,8 @@
 
 @layer components {
   .glass {
-    @apply bg-card/50 backdrop-blur-xl border border-white/10;
+    background-color: hsl(var(--card) / 0.5);
+    @apply backdrop-blur-xl border border-white/10;
   }
 
   .gradient-text {

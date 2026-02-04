@@ -10,12 +10,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Dark theme colors
-        background: "#0a0a0f",
-        foreground: "#fafafa",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         card: {
-          DEFAULT: "#141419",
-          hover: "#1a1a22",
+          DEFAULT: "hsl(var(--card, 0 0% 8%))",
+          hover: "hsl(var(--card-hover, 0 0% 10%))",
         },
         primary: {
           DEFAULT: "#6366f1",
@@ -23,19 +22,19 @@ const config: Config = {
           foreground: "#ffffff",
         },
         secondary: {
-          DEFAULT: "#27272a",
-          hover: "#3f3f46",
-          foreground: "#fafafa",
+          DEFAULT: "hsl(var(--secondary, 0 0% 15%))",
+          hover: "hsl(var(--secondary-hover, 0 0% 20%))",
+          foreground: "hsl(var(--foreground))",
         },
         accent: {
           DEFAULT: "#22c55e",
           hover: "#16a34a",
         },
         muted: {
-          DEFAULT: "#27272a",
-          foreground: "#a1a1aa",
+          DEFAULT: "hsl(var(--muted, 0 0% 15%))",
+          foreground: "hsl(var(--muted-foreground, 0 0% 60%))",
         },
-        border: "#27272a",
+        border: "hsl(var(--border, 0 0% 15%))",
         destructive: {
           DEFAULT: "#ef4444",
           foreground: "#ffffff",

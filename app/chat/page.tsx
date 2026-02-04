@@ -13,6 +13,8 @@ import {
   Trash2,
   Copy,
   Check,
+  Mic,
+  MicOff,
 } from "lucide-react";
 
 interface Message {
@@ -33,8 +35,11 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [assistant, setAssistant] = useState<AssistantInfo>({ name: "Assistant", avatar: "🤖" });
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     // Load assistant info from config
@@ -51,6 +56,36 @@ export default function ChatPage() {
         setMessages(parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })));
       } catch {}
     }
+
+    // Check for speech recognition support
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = "en-US";
+      
+      recognitionRef.current.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0].transcript)
+          .join("");
+        setInput(transcript);
+      };
+      
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+      
+      recognitionRef.current.onerror = () => {
+        setIsListening(false);
+      };
+    }
+
+    // Request notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
   }, []);
 
   useEffect(() => {
@@ -64,6 +99,28 @@ export default function ChatPage() {
     // Scroll to bottom on new messages
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  function toggleListening() {
+    if (!recognitionRef.current) return;
+    
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  }
+
+  function showNotification(title: string, body: string) {
+    if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+      new Notification(title, {
+        body: body.substring(0, 100),
+        icon: "/icon-192.svg",
+        tag: "chat-reply",
+      });
+    }
+  }
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
@@ -99,6 +156,7 @@ export default function ChatPage() {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, assistantMessage]);
+        showNotification(`${assistant.name} replied`, data.response);
       } else {
         // Show error as assistant message
         const errorMessage: Message = {
@@ -272,13 +330,26 @@ export default function ChatPage() {
       {/* Input */}
       <div className="border-t border-white/10 bg-black/20 backdrop-blur-sm shrink-0">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex gap-3">
+          <div className="flex gap-2 sm:gap-3">
+            {speechSupported && (
+              <button
+                onClick={toggleListening}
+                className={`px-3 py-3 rounded-xl transition-colors ${
+                  isListening
+                    ? "bg-red-600 text-white animate-pulse"
+                    : "bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10"
+                }`}
+                title={isListening ? "Stop listening" : "Voice input"}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+            )}
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
+              placeholder={isListening ? "Listening..." : "Type a message..."}
               rows={1}
               className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl resize-none focus:outline-none focus:border-blue-500/50 placeholder-gray-500"
               style={{ minHeight: "48px", maxHeight: "120px" }}
@@ -297,7 +368,7 @@ export default function ChatPage() {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-2 text-center">
-            Press Enter to send, Shift+Enter for new line
+            {speechSupported ? "Tap mic to speak • " : ""}Enter to send, Shift+Enter for new line
           </p>
         </div>
       </div>

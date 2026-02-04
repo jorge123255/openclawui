@@ -17,6 +17,8 @@ import {
   Loader2,
   Brain,
   MessageCircle,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 interface GatewayStatus {
@@ -189,8 +191,9 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           <StatusBadge connected={gatewayStatus.connected} />
+          <ThemeToggle />
           <Link
             href="/settings"
             className="p-2 rounded-lg hover:bg-secondary transition-colors"
@@ -482,6 +485,39 @@ function StatusBadge({ connected }: { connected: boolean }) {
       />
       {connected ? "Connected" : "Disconnected"}
     </div>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const saved = localStorage.getItem("theme") as "dark" | "light" | null;
+    if (saved) {
+      setTheme(saved);
+      document.documentElement.classList.toggle("light", saved === "light");
+    }
+  }, []);
+
+  function toggle() {
+    const newTheme = theme === "dark" ? "light" : "dark";
+    setTheme(newTheme);
+    localStorage.setItem("theme", newTheme);
+    document.documentElement.classList.toggle("light", newTheme === "light");
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      className="p-2 rounded-lg hover:bg-secondary transition-colors"
+      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+    >
+      {theme === "dark" ? (
+        <Sun className="w-5 h-5" />
+      ) : (
+        <Moon className="w-5 h-5" />
+      )}
+    </button>
   );
 }
 
