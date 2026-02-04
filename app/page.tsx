@@ -15,12 +15,45 @@ import {
   Shield,
   MessageSquare,
   Loader2,
+  Brain,
+  MessageCircle,
 } from "lucide-react";
 
 interface GatewayStatus {
   connected: boolean;
   version?: string;
   uptime?: number;
+}
+
+function ChatHero() {
+  const [assistant, setAssistant] = useState({ name: "Assistant", avatar: "🤖" });
+
+  useEffect(() => {
+    fetch("/api/assistant")
+      .then((res) => res.json())
+      .then((data) => setAssistant(data))
+      .catch(() => {});
+  }, []);
+
+  return (
+    <Link
+      href="/chat"
+      className="mb-6 p-6 rounded-2xl bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 hover:border-blue-500/50 transition-all group"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-blue-500/20 rounded-xl group-hover:bg-blue-500/30 transition-colors text-3xl">
+            {assistant.avatar}
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold">Chat with {assistant.name}</h2>
+            <p className="text-sm text-gray-400">Start a conversation right from your browser</p>
+          </div>
+        </div>
+        <ChevronRight className="w-6 h-6 text-gray-400 group-hover:text-blue-400 group-hover:translate-x-1 transition-all" />
+      </div>
+    </Link>
+  );
 }
 
 export default function Home() {
@@ -132,6 +165,9 @@ export default function Home() {
         </div>
       </header>
 
+      {/* Chat Hero */}
+      <ChatHero />
+
       {/* Quick Actions - Row 1 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <QuickAction
@@ -188,11 +224,11 @@ export default function Home() {
           color="green"
         />
         <QuickAction
-          href="/logs"
-          icon={Shield}
-          title="Logs"
-          description="Debug & monitor"
-          color="red"
+          href="/memory"
+          icon={Brain}
+          title="Memory"
+          description="View & search memories"
+          color="purple"
         />
       </div>
 

@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
-import { homedir } from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
 
-const OPENCLAW_CONFIG = join(homedir(), ".openclaw", "openclaw.json");
+const execAsync = promisify(exec);
 
-async function getConfig() {
+async function runOpenClaw(args: string): Promise<any> {
   try {
-    const data = await readFile(OPENCLAW_CONFIG, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return {};
+    const { stdout } = await execAsync(`/usr/local/bin/clawdbot ${args}`, {
+      timeout: 30000,
+      env: { ...process.env, HOME: process.env.HOME || '/Users/gszulc' },
+    });
+    return JSON.parse(stdout);
+  } catch (e: any) {
+    console.error('OpenClaw error:', e.message);
+    throw e;
   }
 }
 
@@ -18,28 +21,18 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { action, nodeId, requestId, command, params } = body;
 
-  const config = await getConfig();
-  const gatewayPort = config.gateway?.port || 18789;
-  const gatewayToken = config.gateway?.auth?.token;
-  
-  const baseUrl = `http://127.0.0.1:${gatewayPort}`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (gatewayToken) {
-    headers["Authorization"] = `Bearer ${gatewayToken}`;
-  }
-
   try {
     switch (action) {
       case "status":
-        return await getStatus(baseUrl, headers);
+        return await getStatus();
+      case "pending":
+        return await getPending();
       case "approve":
-        return await approveNode(baseUrl, headers, requestId);
+        return await approveNode(requestId);
       case "reject":
-        return await rejectNode(baseUrl, headers, requestId);
+        return await rejectNode(requestId);
       case "invoke":
-        return await invokeCommand(baseUrl, headers, nodeId, command, params);
+        return await invokeCommand(nodeId, command, params);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -51,50 +44,18 @@ export async function POST(request: Request) {
   }
 }
 
-async function getStatus(baseUrl: string, headers: Record<string, string>) {
+async function getStatus() {
   try {
-    // Get nodes status
-    const nodesRes = await fetch(`${baseUrl}/rpc`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        method: "nodes.status",
-        params: {},
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    let nodes: any[] = [];
-    if (nodesRes.ok) {
-      const data = await nodesRes.json();
-      nodes = data.result?.nodes || [];
-    }
-
-    // Get pending approvals
-    const pendingRes = await fetch(`${baseUrl}/rpc`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        method: "nodes.pending",
-        params: {},
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    let pending: any[] = [];
-    if (pendingRes.ok) {
-      const data = await pendingRes.json();
-      pending = data.result?.pending || [];
-    }
-
+    const result = await runOpenClaw('nodes status --json');
     return NextResponse.json({
       success: true,
-      nodes,
-      pending,
+      nodes: result.nodes || result || [],
+      pending: result.pending || [],
     });
   } catch (e: any) {
+    // Gateway might not have nodes enabled
     return NextResponse.json({
-      success: false,
+      success: true,
       nodes: [],
       pending: [],
       error: e.message,
@@ -102,30 +63,29 @@ async function getStatus(baseUrl: string, headers: Record<string, string>) {
   }
 }
 
-async function approveNode(
-  baseUrl: string,
-  headers: Record<string, string>,
-  requestId: string
-) {
+async function getPending() {
+  try {
+    const result = await runOpenClaw('nodes pending --json');
+    return NextResponse.json({
+      success: true,
+      pending: result.pending || result || [],
+    });
+  } catch (e: any) {
+    return NextResponse.json({
+      success: true,
+      pending: [],
+      error: e.message,
+    });
+  }
+}
+
+async function approveNode(requestId: string) {
   if (!requestId) {
     return NextResponse.json({ error: "Request ID required" }, { status: 400 });
   }
 
   try {
-    const res = await fetch(`${baseUrl}/rpc`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        method: "nodes.approve",
-        params: { requestId },
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Gateway error: ${res.status}`);
-    }
-
+    await runOpenClaw(`nodes approve "${requestId}" --json`);
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({
@@ -135,30 +95,13 @@ async function approveNode(
   }
 }
 
-async function rejectNode(
-  baseUrl: string,
-  headers: Record<string, string>,
-  requestId: string
-) {
+async function rejectNode(requestId: string) {
   if (!requestId) {
     return NextResponse.json({ error: "Request ID required" }, { status: 400 });
   }
 
   try {
-    const res = await fetch(`${baseUrl}/rpc`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        method: "nodes.reject",
-        params: { requestId },
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Gateway error: ${res.status}`);
-    }
-
+    await runOpenClaw(`nodes reject "${requestId}" --json`);
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({
@@ -168,40 +111,22 @@ async function rejectNode(
   }
 }
 
-async function invokeCommand(
-  baseUrl: string,
-  headers: Record<string, string>,
-  nodeId: string,
-  command: string,
-  params?: any
-) {
+async function invokeCommand(nodeId: string, command: string, params?: any) {
   if (!nodeId || !command) {
     return NextResponse.json({ error: "Node ID and command required" }, { status: 400 });
   }
 
   try {
-    const res = await fetch(`${baseUrl}/rpc`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        method: "nodes.invoke",
-        params: {
-          node: nodeId,
-          invokeCommand: command,
-          invokeParamsJson: params ? JSON.stringify(params) : undefined,
-        },
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Gateway error: ${res.status}`);
+    let args = `nodes invoke "${nodeId}" "${command}"`;
+    if (params) {
+      args += ` --params '${JSON.stringify(params)}'`;
     }
-
-    const data = await res.json();
+    args += ' --json';
+    
+    const result = await runOpenClaw(args);
     return NextResponse.json({
       success: true,
-      result: data.result,
+      result,
     });
   } catch (e: any) {
     return NextResponse.json({
