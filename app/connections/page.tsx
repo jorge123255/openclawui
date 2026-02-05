@@ -380,7 +380,7 @@ export default function ConnectionsPage() {
                 <div>
                   <h1 className="text-xl font-semibold">Connections</h1>
                   <p className="text-sm text-gray-400">
-                    {stats.total} skills installed · {stats.connected} connected
+                    External services &amp; integrations
                   </p>
                 </div>
               </div>

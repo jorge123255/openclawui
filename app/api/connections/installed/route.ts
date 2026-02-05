@@ -96,10 +96,12 @@ export async function GET() {
     const connections: InstalledConnection[] = [];
 
     // Match installed skills to registry entries
+    // ONLY show skills that actually connect to external services (have auth requirements)
     const skillEntries = Array.from(installedSkills.entries());
     for (const [skillName, source] of skillEntries) {
       const def = SKILL_TO_CONNECTION.get(skillName);
-      if (def) {
+      if (def && def.auth.type !== "none") {
+        // This skill connects to an external service — show it
         const status = await checkConnection(def);
         connections.push({
           id: def.id,
@@ -114,21 +116,9 @@ export async function GET() {
           setupSteps: def.auth.setupSteps,
           source,
         });
-      } else {
-        // Skill installed but not in registry — show as "no setup needed"
-        connections.push({
-          id: skillName,
-          name: skillName.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          description: "Installed skill",
-          icon: "puzzle",
-          color: "gray",
-          skill: skillName,
-          category: "other",
-          authType: "none",
-          status: "connected",
-          source,
-        });
       }
+      // Skills without registry entries or with authType "none" are just tools —
+      // they belong on the Skills page, not Connections
     }
 
     // Sort: disconnected first, then by category, then alphabetical
@@ -141,6 +131,7 @@ export async function GET() {
     return NextResponse.json({
       connections,
       totalInstalled: installedSkills.size,
+      totalConnections: connections.length,
       connected: connections.filter(c => c.status === "connected").length,
       disconnected: connections.filter(c => c.status === "disconnected").length,
     });
