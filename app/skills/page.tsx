@@ -101,6 +101,8 @@ export default function SkillsPage() {
   const [installSuccess, setInstallSuccess] = useState<string | null>(null);
   const [configSkill, setConfigSkill] = useState<any>(null);
   const [configLoading, setConfigLoading] = useState(false);
+  const [runningCmd, setRunningCmd] = useState<string | null>(null);
+  const [cmdOutput, setCmdOutput] = useState<{ cmd: string; output: string; success: boolean } | null>(null);
   const [storeLoading, setStoreLoading] = useState(false);
 
   useEffect(() => {
@@ -190,6 +192,31 @@ export default function SkillsPage() {
       alert("Error: " + e.message);
     }
     setConfigLoading(false);
+  }
+
+  async function runCommand(kind: string, formula: string, label: string) {
+    setRunningCmd(label);
+    setCmdOutput(null);
+    try {
+      const res = await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run-command", kind, formula }),
+      });
+      const data = await res.json();
+      setCmdOutput({
+        cmd: data.command || `${kind} install ${formula}`,
+        output: data.output || data.stderr || data.error || "Done",
+        success: data.success !== false,
+      });
+      // Re-check config after install
+      if (data.success && configSkill) {
+        setTimeout(() => openConfig(configSkill.dirName), 1500);
+      }
+    } catch (e: any) {
+      setCmdOutput({ cmd: label, output: e.message, success: false });
+    }
+    setRunningCmd(null);
   }
 
   async function uninstallSkill(name: string) {
@@ -575,11 +602,26 @@ export default function SkillsPage() {
                                   {check.type === "bin" ? `CLI: ${check.name}` : `Env: ${check.name}`}
                                 </span>
                               </div>
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                check.met ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                              }`}>
-                                {check.met ? "Found" : "Missing"}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                  check.met ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                }`}>
+                                  {check.met ? "Found" : "Missing"}
+                                </span>
+                                {!check.met && check.type === "bin" && (
+                                  <button
+                                    onClick={() => runCommand("brew", check.name, `brew install ${check.name}`)}
+                                    disabled={runningCmd !== null}
+                                    className="px-2 py-0.5 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 rounded text-xs text-yellow-400 transition-colors"
+                                  >
+                                    {runningCmd === `brew install ${check.name}` ? (
+                                      <Loader2 className="w-3 h-3 animate-spin inline" />
+                                    ) : (
+                                      "Install"
+                                    )}
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -592,17 +634,60 @@ export default function SkillsPage() {
                     <div>
                       <h3 className="font-semibold mb-2 text-sm">Install Commands</h3>
                       <div className="space-y-2">
-                        {configSkill.installSteps.map((step: any, i: number) => (
-                          <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
-                            <p className="text-sm text-gray-300 mb-1">{step.label}</p>
-                            {step.formula && (
-                              <code className="text-xs bg-black/30 px-2 py-1 rounded text-yellow-400 block">
-                                brew install {step.formula}
-                              </code>
-                            )}
-                          </div>
-                        ))}
+                        {configSkill.installSteps.map((step: any, i: number) => {
+                          const kind = step.kind || "brew";
+                          const formula = step.formula || step.id;
+                          const cmd = formula ? `${kind} install ${formula}` : step.label;
+                          return (
+                            <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-sm text-gray-300">{step.label}</p>
+                                {formula && (
+                                  <button
+                                    onClick={() => runCommand(kind, formula, step.label)}
+                                    disabled={runningCmd !== null}
+                                    className="px-3 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 rounded text-xs text-yellow-400 transition-colors flex items-center gap-1"
+                                  >
+                                    {runningCmd === step.label ? (
+                                      <><Loader2 className="w-3 h-3 animate-spin" /> Running...</>
+                                    ) : (
+                                      <><Terminal className="w-3 h-3" /> Run</>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                              {formula && (
+                                <code className="text-xs bg-black/30 px-2 py-1 rounded text-yellow-400 block">
+                                  {cmd}
+                                </code>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Command Output */}
+                  {cmdOutput && (
+                    <div className={`p-3 rounded-lg border text-sm ${
+                      cmdOutput.success
+                        ? "bg-green-500/10 border-green-500/30"
+                        : "bg-red-500/10 border-red-500/30"
+                    }`}>
+                      <div className="flex items-center gap-2 mb-2">
+                        {cmdOutput.success ? (
+                          <CheckCircle className="w-4 h-4 text-green-400" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-red-400" />
+                        )}
+                        <span className={cmdOutput.success ? "text-green-400" : "text-red-400"}>
+                          {cmdOutput.success ? "Success" : "Failed"}: {cmdOutput.cmd}
+                        </span>
+                      </div>
+                      <pre className="text-xs text-gray-400 bg-black/20 p-2 rounded overflow-x-auto whitespace-pre-wrap max-h-32">
+                        {cmdOutput.output}
+                      </pre>
                     </div>
                   )}
 

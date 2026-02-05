@@ -14,7 +14,8 @@ const SKILLS_DIRS = [
 ];
 
 export async function POST(request: Request) {
-  const { action, name, query } = await request.json();
+  const body = await request.json();
+  const { action, name, query } = body;
 
   try {
     switch (action) {
@@ -32,6 +33,8 @@ export async function POST(request: Request) {
         return await getSkillInfo(name);
       case "configure":
         return await getSkillConfig(name);
+      case "run-command":
+        return await runInstallCommand(body);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -406,6 +409,96 @@ async function uninstallSkill(name: string) {
     success: false,
     error: `Could not find skill "${name}" to uninstall`,
   });
+}
+
+// Allowed install command patterns for safety
+const ALLOWED_KINDS: Record<string, (formula: string) => string> = {
+  "brew": (f) => `brew install ${f}`,
+  "npm": (f) => `npm install -g ${f}`,
+  "pip": (f) => `pip3 install ${f}`,
+  "pip3": (f) => `pip3 install ${f}`,
+  "cargo": (f) => `cargo install ${f}`,
+  "go": (f) => `go install ${f}`,
+  "gem": (f) => `gem install ${f}`,
+  "apt": (f) => `sudo apt-get install -y ${f}`,
+};
+
+async function runInstallCommand(body: any) {
+  const { command, kind, formula } = body;
+
+  const execEnv = { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` };
+
+  // Option 1: Run from kind+formula (safe, whitelisted)
+  if (kind && formula) {
+    const cmdBuilder = ALLOWED_KINDS[kind];
+    if (!cmdBuilder) {
+      return NextResponse.json({ error: `Unknown install kind: ${kind}` }, { status: 400 });
+    }
+    // Sanitize formula - only allow alphanumeric, hyphens, dots, slashes, @
+    if (!/^[a-zA-Z0-9@._\-/]+$/.test(formula)) {
+      return NextResponse.json({ error: "Invalid formula name" }, { status: 400 });
+    }
+    const cmd = cmdBuilder(formula);
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 300000, env: execEnv });
+      return NextResponse.json({
+        success: true,
+        command: cmd,
+        output: String(stdout).trim(),
+        stderr: String(stderr || "").trim(),
+      });
+    } catch (e: any) {
+      return NextResponse.json({
+        success: false,
+        command: cmd,
+        error: e.message,
+        output: String(e.stdout || "").trim(),
+        stderr: String(e.stderr || "").trim(),
+      });
+    }
+  }
+
+  // Option 2: Run an arbitrary command (with safety checks)
+  if (command) {
+    // Only allow certain safe patterns
+    const safePatterns = [
+      /^brew install\s/,
+      /^npm install\s/,
+      /^pip3? install\s/,
+      /^cargo install\s/,
+      /^go install\s/,
+      /^gem install\s/,
+      /^which\s/,
+      /^caffeinate/,
+    ];
+
+    const isSafe = safePatterns.some(p => p.test(command.trim()));
+    if (!isSafe) {
+      return NextResponse.json({
+        error: "Command not allowed. Only install commands (brew, npm, pip, cargo) are permitted.",
+      }, { status: 403 });
+    }
+
+    try {
+      const { stdout, stderr } = await execAsync(command, { timeout: 300000, env: execEnv });
+      return NextResponse.json({
+        success: true,
+        command,
+        output: String(stdout).trim(),
+        stderr: String(stderr || "").trim(),
+      });
+    } catch (e: any) {
+      return NextResponse.json({
+        success: false,
+        command,
+        error: e.message,
+        output: String(e.stdout || "").trim(),
+        stderr: String(e.stderr || "").trim(),
+      });
+    }
+  }
+
+  return NextResponse.json({ error: "Provide kind+formula or command" }, { status: 400 });
 }
 
 async function getSkillConfig(name: string) {
