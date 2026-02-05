@@ -140,12 +140,12 @@ export default function IntegrationsPage() {
       if (data.config) {
         setConfig(data.config);
         buildIntegrationsList(data.config);
+        
+        // Pass config directly (state won't be updated yet)
+        loadN8nWorkflows(data.config).catch(e => console.error("N8N load error:", e));
       }
 
-      // Load N8N workflows (fire and forget, don't block)
-      loadN8nWorkflows().catch(e => console.error("N8N load error:", e));
-      
-      // Load MCP tools (fire and forget, don't block)
+      // Load MCP tools (doesn't depend on config state)
       loadMcpTools().catch(e => console.error("MCP load error:", e));
     } catch (e) {
       console.error("Failed to load config:", e);
@@ -283,8 +283,8 @@ export default function IntegrationsPage() {
     setIntegrations(list);
   }
 
-  async function loadN8nWorkflows() {
-    const env = config.env || {};
+  async function loadN8nWorkflows(cfg?: any) {
+    const env = (cfg || config).env || {};
     if (!env.N8N_BASE_URL || !env.N8N_API_KEY) {
       setN8nWorkflows([]);
       return;
