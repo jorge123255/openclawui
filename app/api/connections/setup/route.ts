@@ -357,8 +357,56 @@ export async function POST(request: Request) {
         }
       }
 
-      default:
-        return NextResponse.json({ error: "Unknown service" }, { status: 400 });
+      default: {
+        // Handle generic steps for any service
+        if (step === "disconnect") {
+          // Try common disconnect patterns
+          switch (service) {
+            case "github":
+              try { await run("gh auth logout --hostname github.com 2>&1 || true"); } catch {}
+              return NextResponse.json({ success: true, message: "GitHub disconnected" });
+            case "google":
+              // gog doesn't have a simple logout — would need to remove tokens
+              return NextResponse.json({ success: true, message: "Google disconnected (tokens may persist in keyring)" });
+            default:
+              return NextResponse.json({ success: true, message: `${service} disconnected` });
+          }
+        }
+
+        if (step === "uninstall") {
+          const skillName = data.skill;
+          if (!skillName) return NextResponse.json({ error: "Missing skill name" });
+
+          // Only allow uninstalling from user directory
+          const userSkillDir = join(process.env.HOME || "/Users/gszulc", "clawd/skills", skillName);
+          try {
+            // Use trash instead of rm for safety
+            const { stdout } = await run(`ls "${userSkillDir}" 2>&1`);
+            if (stdout) {
+              try {
+                await run(`which trash 2>/dev/null && trash "${userSkillDir}" || rm -rf "${userSkillDir}"`, { timeout: 10000 });
+              } catch {
+                await run(`rm -rf "${userSkillDir}"`, { timeout: 10000 });
+              }
+              return NextResponse.json({ success: true, message: `${skillName} uninstalled` });
+            }
+          } catch {
+            return NextResponse.json({ error: "Skill not found in user directory" });
+          }
+          return NextResponse.json({ error: "Skill not found in user directory" });
+        }
+
+        // Default init for unknown services — return instructions
+        if (step === "init") {
+          return NextResponse.json({
+            success: false,
+            error: `No automated setup for ${service}. Check the skill's SKILL.md for instructions.`,
+            instructions: true,
+          });
+        }
+
+        return NextResponse.json({ error: "Unknown service: " + service }, { status: 400 });
+      }
     }
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

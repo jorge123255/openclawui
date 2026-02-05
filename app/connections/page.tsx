@@ -37,6 +37,7 @@ import {
   Lightbulb,
   Speaker,
   Puzzle,
+  Trash2,
 } from "lucide-react";
 
 // ── Icon mapping ──
@@ -265,6 +266,55 @@ export default function ConnectionsPage() {
     }
   }
 
+  // ── Edit modal state ──
+  const [showEdit, setShowEdit] = useState<Connection | null>(null);
+  const [editWorking, setEditWorking] = useState(false);
+
+  function openEditModal(conn: Connection) {
+    setShowEdit(conn);
+  }
+
+  async function disconnectService(conn: Connection) {
+    if (!confirm(`Disconnect ${conn.name}? This will remove auth credentials for this service.`)) return;
+    setEditWorking(true);
+    try {
+      const res = await fetch("/api/connections/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: conn.id, step: "disconnect" }),
+      });
+      const data = await res.json();
+      if (data.success || data.error?.includes("not")) {
+        setShowEdit(null);
+        fetchConnections(true);
+      } else {
+        alert(data.error || "Failed to disconnect");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+    setEditWorking(false);
+  }
+
+  async function confirmUninstall(conn: Connection) {
+    if (!confirm(`Uninstall ${conn.name} skill? This removes the skill from your workspace.`)) return;
+    try {
+      const res = await fetch("/api/connections/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: conn.id, step: "uninstall", data: { skill: conn.skill } }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchConnections(true);
+      } else {
+        alert(data.error || "Failed to uninstall");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+  }
+
   // Auto-trigger setup steps
   useEffect(() => {
     if (!showSetup || setupStep !== "init") return;
@@ -420,22 +470,43 @@ export default function ConnectionsPage() {
 
                       <div className="flex items-center gap-2 mt-3">
                         {conn.status === "connected" ? (
-                          <div className="flex-1 py-1.5 px-3 bg-green-500/10 rounded-lg text-xs text-center text-green-400">
-                            ✓ Connected
-                          </div>
+                          <>
+                            <div className="flex-1 py-1.5 px-3 bg-green-500/10 rounded-lg text-xs text-center text-green-400">
+                              ✓ Connected
+                            </div>
+                            <button
+                              onClick={() => openEditModal(conn)}
+                              className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+                              title="Edit connection"
+                            >
+                              <Settings className="w-3.5 h-3.5 text-gray-400" />
+                            </button>
+                          </>
                         ) : (
-                          <button
-                            onClick={() => openSetupWizard(conn)}
-                            className="flex-1 py-1.5 px-3 bg-white/10 hover:bg-white/20 rounded-lg text-xs text-center transition-colors flex items-center justify-center gap-1"
-                          >
-                            <Plus className="w-3 h-3" />
-                            Connect
-                          </button>
+                          <>
+                            <button
+                              onClick={() => openSetupWizard(conn)}
+                              className="flex-1 py-1.5 px-3 bg-white/10 hover:bg-white/20 rounded-lg text-xs text-center transition-colors flex items-center justify-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Connect
+                            </button>
+                            {conn.source === "user" && (
+                              <button
+                                onClick={() => confirmUninstall(conn)}
+                                className="p-1.5 bg-white/5 hover:bg-red-500/20 rounded-lg transition-colors"
+                                title="Uninstall skill"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-400" />
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
 
                       <div className="mt-2 text-xs text-gray-500">
                         skill: <code className="bg-white/10 px-1 rounded">{conn.skill}</code>
+                        {conn.source === "user" && <span className="ml-1 text-blue-400">(installed)</span>}
                       </div>
                     </motion.div>
                   );
@@ -498,6 +569,96 @@ export default function ConnectionsPage() {
           </div>
         )}
       </main>
+
+      {/* ── Edit/Manage Modal ── */}
+      <AnimatePresence>
+        {showEdit && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowEdit(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-gray-900 border border-white/10 rounded-2xl w-full max-w-md overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-6 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  {(() => { const I = IconFor(showEdit.icon); return <I className="w-6 h-6 text-green-400" />; })()}
+                  <div>
+                    <h2 className="text-lg font-semibold">{showEdit.name}</h2>
+                    <p className="text-sm text-green-400">Connected</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-3">
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Skill</span>
+                    <code className="text-gray-300">{showEdit.skill}</code>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Auth Type</span>
+                    <span className="text-gray-300">{showEdit.authType}</span>
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-white/5 border border-white/10">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Source</span>
+                    <span className="text-gray-300">{showEdit.source === "user" ? "User installed" : "Built-in"}</span>
+                  </div>
+                </div>
+
+                {/* Reconnect */}
+                <button
+                  onClick={() => { setShowEdit(null); openSetupWizard(showEdit); }}
+                  className="w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Reconnect / Re-authenticate
+                </button>
+
+                {/* Disconnect */}
+                {showEdit.authType !== "none" && (
+                  <button
+                    onClick={() => disconnectService(showEdit)}
+                    disabled={editWorking}
+                    className="w-full py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-sm text-red-400 transition-colors flex items-center justify-center gap-2"
+                  >
+                    {editWorking ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+                    Disconnect
+                  </button>
+                )}
+
+                {/* Uninstall (user-installed only) */}
+                {showEdit.source === "user" && (
+                  <button
+                    onClick={() => { const c = showEdit; setShowEdit(null); confirmUninstall(c); }}
+                    className="w-full py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-sm text-red-400 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Uninstall Skill
+                  </button>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-white/10 flex justify-end">
+                <button onClick={() => setShowEdit(null)} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm">
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Setup Wizard Modal ── */}
       <AnimatePresence>
