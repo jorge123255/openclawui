@@ -30,6 +30,8 @@ export async function POST(request: Request) {
         return await uninstallSkill(name);
       case "info":
         return await getSkillInfo(name);
+      case "configure":
+        return await getSkillConfig(name);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -404,6 +406,129 @@ async function uninstallSkill(name: string) {
     success: false,
     error: `Could not find skill "${name}" to uninstall`,
   });
+}
+
+async function getSkillConfig(name: string) {
+  if (!name) {
+    return NextResponse.json({ error: "Skill name required" }, { status: 400 });
+  }
+
+  for (const dir of SKILLS_DIRS) {
+    const skillPath = join(dir, name);
+    try {
+      const content = await readFile(join(skillPath, "SKILL.md"), "utf-8");
+
+      // Parse frontmatter
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      const frontmatter = fmMatch ? fmMatch[1] : "";
+
+      // Parse metadata for requirements
+      let requires: any = {};
+      let installSteps: any[] = [];
+      let description = "";
+      let skillName = name;
+
+      // Get description
+      const descMatch = frontmatter.match(/description:\s*(.+)/);
+      if (descMatch) description = descMatch[1].trim();
+
+      // Get name
+      const nameMatch = frontmatter.match(/^name:\s*(.+)/m);
+      if (nameMatch) skillName = nameMatch[1].trim();
+
+      // Parse metadata block (YAML-ish)
+      const metaMatch = content.match(/metadata:\s*\n?\s*\{[\s\S]*?\}/);
+      if (metaMatch) {
+        try {
+          // Try to extract requires and install from metadata JSON
+          const metaStr = metaMatch[0].replace(/metadata:\s*/, "");
+          // This is often pseudo-JSON in YAML, try to parse the openclaw section
+          const reqBinsMatch = metaStr.match(/"bins":\s*\[([^\]]*)\]/);
+          if (reqBinsMatch) {
+            requires.bins = reqBinsMatch[1].replace(/"/g, "").split(",").map((s: string) => s.trim()).filter(Boolean);
+          }
+          const reqEnvMatch = metaStr.match(/"env":\s*\[([^\]]*)\]/);
+          if (reqEnvMatch) {
+            requires.env = reqEnvMatch[1].replace(/"/g, "").split(",").map((s: string) => s.trim()).filter(Boolean);
+          }
+
+          // Extract install steps
+          const installMatch = metaStr.match(/"install":\s*\[([\s\S]*?)\]/);
+          if (installMatch) {
+            const stepsStr = installMatch[1];
+            const stepBlocks = stepsStr.split(/\{/).filter(Boolean);
+            for (const block of stepBlocks) {
+              const idMatch = block.match(/"id":\s*"([^"]+)"/);
+              const kindMatch = block.match(/"kind":\s*"([^"]+)"/);
+              const formulaMatch = block.match(/"formula":\s*"([^"]+)"/);
+              const labelMatch = block.match(/"label":\s*"([^"]+)"/);
+              if (idMatch || labelMatch) {
+                installSteps.push({
+                  id: idMatch?.[1],
+                  kind: kindMatch?.[1],
+                  formula: formulaMatch?.[1],
+                  label: labelMatch?.[1] || `Install ${formulaMatch?.[1] || idMatch?.[1]}`,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          // Metadata parsing failed, not critical
+        }
+      }
+
+      // Check which requirements are met
+      const checks: any[] = [];
+
+      // Check required binaries
+      if (requires.bins) {
+        for (const bin of requires.bins) {
+          try {
+            await execAsync(`which ${bin} 2>/dev/null`, { env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:${process.env.PATH}` } });
+            checks.push({ type: "bin", name: bin, met: true });
+          } catch {
+            checks.push({ type: "bin", name: bin, met: false });
+          }
+        }
+      }
+
+      // Check required env vars
+      if (requires.env) {
+        for (const envVar of requires.env) {
+          const val = process.env[envVar];
+          checks.push({ type: "env", name: envVar, met: !!val && val.length > 0 });
+        }
+      }
+
+      // Extract quick start / usage from content
+      const afterFrontmatter = content.replace(/^---[\s\S]*?---\n*/, "");
+      const quickStartMatch = afterFrontmatter.match(/## Quick [Ss]tart([\s\S]*?)(?=\n## |\n---|\n$)/);
+      const usageMatch = afterFrontmatter.match(/## Usage([\s\S]*?)(?=\n## |\n---|\n$)/);
+      const quickStart = quickStartMatch?.[1]?.trim() || usageMatch?.[1]?.trim() || "";
+
+      // Check if all requirements are met
+      const allMet = checks.length === 0 || checks.every(c => c.met);
+
+      return NextResponse.json({
+        success: true,
+        skill: {
+          name: skillName,
+          dirName: name,
+          description,
+          requires,
+          installSteps,
+          checks,
+          allMet,
+          quickStart: quickStart.slice(0, 1000),
+          path: skillPath,
+        },
+      });
+    } catch (e) {
+      // Try next directory
+    }
+  }
+
+  return NextResponse.json({ success: false, error: `Skill "${name}" not found` });
 }
 
 async function getSkillInfo(name: string) {

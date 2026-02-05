@@ -32,6 +32,9 @@ import {
   List,
   ChevronRight,
   X,
+  Settings,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 
 interface Skill {
@@ -96,6 +99,8 @@ export default function SkillsPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [installSuccess, setInstallSuccess] = useState<string | null>(null);
+  const [configSkill, setConfigSkill] = useState<any>(null);
+  const [configLoading, setConfigLoading] = useState(false);
   const [storeLoading, setStoreLoading] = useState(false);
 
   useEffect(() => {
@@ -164,6 +169,27 @@ export default function SkillsPage() {
       alert(`Error: ${e.message}`);
     }
     setInstalling(null);
+  }
+
+  async function openConfig(skillName: string) {
+    setConfigLoading(true);
+    setConfigSkill(null);
+    try {
+      const res = await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "configure", name: skillName }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConfigSkill(data.skill);
+      } else {
+        alert(data.error || "Could not load skill config");
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    }
+    setConfigLoading(false);
   }
 
   async function uninstallSkill(name: string) {
@@ -242,6 +268,7 @@ export default function SkillsPage() {
   }
 
   return (
+    <>
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
       {/* Header */}
       <header className="border-b border-white/10 bg-black/20 backdrop-blur-sm sticky top-0 z-10">
@@ -357,12 +384,22 @@ export default function SkillsPage() {
                 >
                   <div className="flex items-start justify-between mb-2">
                     <h3 className="font-semibold">{skill.name}</h3>
-                    <button
-                      onClick={() => uninstallSkill(skill.name)}
-                      className="p-1.5 hover:bg-red-500/20 rounded-lg text-gray-500 hover:text-red-400 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openConfig(skill.name)}
+                        className="p-1.5 hover:bg-white/10 rounded-lg text-gray-500 hover:text-yellow-400 transition-colors"
+                        title="Configure"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => uninstallSkill(skill.name)}
+                        className="p-1.5 hover:bg-red-500/20 rounded-lg text-gray-500 hover:text-red-400 transition-colors"
+                        title="Uninstall"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   <p className="text-sm text-gray-400 line-clamp-2">{skill.description}</p>
                   {skill.version && (
@@ -465,6 +502,150 @@ export default function SkillsPage() {
         )}
       </div>
     </main>
+
+    {/* Config Modal */}
+    <AnimatePresence>
+      {(configSkill || configLoading) && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => { setConfigSkill(null); setConfigLoading(false); }}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-gray-900 border border-white/10 rounded-2xl w-full max-w-lg max-h-[85vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {configLoading ? (
+              <div className="p-12 text-center">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-yellow-400" />
+                <p className="text-gray-400">Loading configuration...</p>
+              </div>
+            ) : configSkill ? (
+              <>
+                {/* Header */}
+                <div className="p-6 border-b border-white/10">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-yellow-500/20 rounded-lg">
+                      <Settings className="w-6 h-6 text-yellow-400" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-semibold">{configSkill.name}</h2>
+                      <p className="text-sm text-gray-400">{configSkill.description}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Body */}
+                <div className="p-6 space-y-4 overflow-y-auto max-h-[55vh]">
+                  {/* Status */}
+                  <div className={`p-3 rounded-lg border text-sm flex items-center gap-2 ${
+                    configSkill.allMet
+                      ? "bg-green-500/10 border-green-500/30 text-green-400"
+                      : "bg-yellow-500/10 border-yellow-500/30 text-yellow-400"
+                  }`}>
+                    {configSkill.allMet ? (
+                      <><CheckCircle className="w-4 h-4" /> All requirements met — ready to use!</>
+                    ) : (
+                      <><AlertCircle className="w-4 h-4" /> Some requirements need attention</>
+                    )}
+                  </div>
+
+                  {/* Requirements */}
+                  {configSkill.checks?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-2 text-sm">Requirements</h3>
+                      <div className="space-y-2">
+                        {configSkill.checks.map((check: any, i: number) => (
+                          <div key={i} className={`p-3 rounded-lg border ${
+                            check.met ? "bg-white/5 border-white/10" : "bg-red-500/10 border-red-500/30"
+                          }`}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                {check.met ? (
+                                  <Check className="w-4 h-4 text-green-400" />
+                                ) : (
+                                  <X className="w-4 h-4 text-red-400" />
+                                )}
+                                <span className="text-sm">
+                                  {check.type === "bin" ? `CLI: ${check.name}` : `Env: ${check.name}`}
+                                </span>
+                              </div>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                check.met ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                              }`}>
+                                {check.met ? "Found" : "Missing"}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Install Steps */}
+                  {configSkill.installSteps?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-2 text-sm">Install Commands</h3>
+                      <div className="space-y-2">
+                        {configSkill.installSteps.map((step: any, i: number) => (
+                          <div key={i} className="p-3 bg-white/5 rounded-lg border border-white/10">
+                            <p className="text-sm text-gray-300 mb-1">{step.label}</p>
+                            {step.formula && (
+                              <code className="text-xs bg-black/30 px-2 py-1 rounded text-yellow-400 block">
+                                brew install {step.formula}
+                              </code>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick Start */}
+                  {configSkill.quickStart && (
+                    <div>
+                      <h3 className="font-semibold mb-2 text-sm">Quick Start</h3>
+                      <pre className="p-3 bg-black/30 rounded-lg text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                        {configSkill.quickStart}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* No config needed */}
+                  {configSkill.checks?.length === 0 && !configSkill.installSteps?.length && (
+                    <div className="text-center py-4 text-gray-400">
+                      <p>No special configuration needed.</p>
+                      <p className="text-sm mt-1">This skill works out of the box!</p>
+                    </div>
+                  )}
+
+                  {/* Path */}
+                  <div className="text-xs text-gray-500">
+                    Path: <code className="bg-white/5 px-1 rounded">{configSkill.path}</code>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="p-4 border-t border-white/10 flex justify-end">
+                  <button
+                    onClick={() => setConfigSkill(null)}
+                    className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   );
 }
 
