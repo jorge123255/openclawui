@@ -163,8 +163,17 @@ export default function ConnectionsPage() {
   ]);
 
   const [showSettings, setShowSettings] = useState<string | null>(null);
-  const [setupLoading, setSetupLoading] = useState(false);
+  // setupLoading no longer needed - replaced by setup wizard
   const [savingSettings, setSavingSettings] = useState(false);
+  
+  // Setup wizard state
+  const [showSetup, setShowSetup] = useState<string | null>(null);
+  const [setupStep, setSetupStep] = useState<string>("init");
+  const [setupData, setSetupData] = useState<any>({});
+  const [setupError, setSetupError] = useState<string>("");
+  const [setupMessage, setSetupMessage] = useState<string>("");
+  const [setupAuthUrl, setSetupAuthUrl] = useState<string>("");
+  const [setupWorking, setSetupWorking] = useState(false);
   
   // Settings form state
   const [selectedModel, setSelectedModel] = useState("auto");
@@ -181,6 +190,14 @@ export default function ConnectionsPage() {
     loadAvailableModels();
     loadSavedSettings();
   }, []);
+
+  // Auto-trigger setup steps
+  useEffect(() => {
+    if (!showSetup || setupStep !== "init") return;
+    if (showSetup === "google") googleCheckCredentials();
+    else if (showSetup === "github") githubInit();
+    else if (["apple-reminders", "things", "imessage"].includes(showSetup)) simpleSetup(showSetup);
+  }, [showSetup, setupStep]);
 
   async function loadAvailableModels() {
     // Cloud models (from config)
@@ -309,27 +326,133 @@ export default function ConnectionsPage() {
     setConnections(updated);
   }
 
-  async function setupConnection(id: string) {
-    setSetupLoading(true);
+  function openSetupWizard(id: string) {
+    setShowSetup(id);
+    setSetupStep("init");
+    setSetupData({});
+    setSetupError("");
+    setSetupMessage("");
+    setSetupAuthUrl("");
+    setSetupWorking(false);
+  }
+
+  function closeSetupWizard() {
+    setShowSetup(null);
+    setSetupStep("init");
+    setSetupData({});
+    setSetupError("");
+    setSetupMessage("");
+    setSetupAuthUrl("");
+    setSetupWorking(false);
+    checkConnections();
+  }
+
+  async function setupApiCall(service: string, step: string, data: any = {}) {
+    setSetupWorking(true);
+    setSetupError("");
     try {
-      const res = await fetch(`/api/connections/setup`, {
+      const res = await fetch("/api/connections/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ service: id }),
+        body: JSON.stringify({ service, step, data }),
       });
-      const data = await res.json();
-      
-      if (data.authUrl) {
-        window.open(data.authUrl, "_blank");
-      } else if (data.success) {
-        await checkConnections();
-      } else {
-        alert(data.error || "Setup failed");
-      }
+      const result = await res.json();
+      setSetupWorking(false);
+      return result;
     } catch (e: any) {
-      alert("Error: " + e.message);
+      setSetupWorking(false);
+      setSetupError(e.message);
+      return { error: e.message };
     }
-    setSetupLoading(false);
+  }
+
+  // ── Google setup flow ──
+  async function googleCheckCredentials() {
+    const result = await setupApiCall("google", "check-credentials");
+    if (result.hasCreds) {
+      setSetupStep("google-email");
+    } else {
+      setSetupStep("google-credentials");
+    }
+  }
+
+  async function googleSaveCredentials() {
+    const json = setupData.credentialsJson;
+    if (!json?.trim()) { setSetupError("Paste the credentials JSON"); return; }
+    try { JSON.parse(json); } catch { setSetupError("Invalid JSON"); return; }
+    
+    const result = await setupApiCall("google", "save-credentials", { credentialsJson: json });
+    if (result.success) {
+      setSetupStep("google-email");
+      setSetupMessage("Credentials saved!");
+    } else {
+      setSetupError(result.error || "Failed to save credentials");
+    }
+  }
+
+  async function googleStartAuth() {
+    const email = setupData.email;
+    if (!email?.includes("@")) { setSetupError("Enter a valid email"); return; }
+    
+    const result = await setupApiCall("google", "start-auth", { email });
+    if (result.authUrl) {
+      setSetupAuthUrl(result.authUrl);
+      setSetupStep("google-authorize");
+      setSetupMessage(result.message || "");
+    } else {
+      setSetupError(result.error || "Failed to get auth URL");
+    }
+  }
+
+  async function googleCompleteAuth() {
+    const redirectUrl = setupData.redirectUrl;
+    if (!redirectUrl?.includes("http")) { setSetupError("Paste the redirect URL from your browser"); return; }
+    
+    const result = await setupApiCall("google", "complete-auth", { redirectUrl });
+    if (result.success) {
+      setSetupStep("success");
+      setSetupMessage(result.message || "Connected!");
+    } else {
+      setSetupError(result.error || "Auth completion failed");
+    }
+  }
+
+  // ── GitHub setup flow ──
+  async function githubInit() {
+    const result = await setupApiCall("github", "init");
+    if (result.error) {
+      setSetupError(result.error);
+    } else {
+      setSetupAuthUrl(result.authUrl || "");
+      setSetupStep("github-token");
+      setSetupMessage(result.message || "");
+    }
+  }
+
+  async function githubComplete() {
+    const token = setupData.token;
+    if (!token?.trim()) { setSetupError("Paste your token"); return; }
+    
+    const result = await setupApiCall("github", "complete", { token: token.trim() });
+    if (result.success) {
+      setSetupStep("success");
+      setSetupMessage(result.message || "Connected!");
+    } else {
+      setSetupError(result.error || "Auth failed");
+    }
+  }
+
+  // ── Simple services (permission-based) ──
+  async function simpleSetup(service: string) {
+    const result = await setupApiCall(service, "init");
+    if (result.success) {
+      setSetupStep("success");
+      setSetupMessage(result.message || "Connected!");
+    } else {
+      setSetupStep("instructions");
+      setSetupError(result.error || "Setup required");
+      setSetupData((prev: any) => ({ ...prev, steps: result.steps }));
+    }
   }
 
   const colorClasses: Record<string, string> = {
@@ -467,15 +590,10 @@ export default function ConnectionsPage() {
                   </>
                 ) : (
                   <button
-                    onClick={() => setupConnection(conn.id)}
-                    disabled={setupLoading}
+                    onClick={() => openSetupWizard(conn.id)}
                     className="flex-1 py-2 px-3 bg-white/10 hover:bg-white/20 rounded-lg text-sm text-center transition-colors flex items-center justify-center gap-2"
                   >
-                    {setupLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Plus className="w-4 h-4" />
-                    )}
+                    <Plus className="w-4 h-4" />
                     Connect
                   </button>
                 )}
@@ -510,6 +628,264 @@ export default function ConnectionsPage() {
           </div>
         </div>
       </main>
+
+      {/* Setup Wizard Modal */}
+      <AnimatePresence>
+        {showSetup && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={closeSetupWizard}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-gray-900 border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="p-6 border-b border-white/10">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-purple-500/20 rounded-lg">
+                    <Zap className="w-6 h-6 text-purple-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold">
+                      Connect {connections.find(c => c.id === showSetup)?.name}
+                    </h2>
+                    <p className="text-sm text-gray-400">
+                      {setupStep === "success" ? "All done!" : "Follow the steps below"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 space-y-4">
+                {/* Error display */}
+                {setupError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+                    {setupError}
+                  </div>
+                )}
+
+                {/* Success state */}
+                {setupStep === "success" && (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Check className="w-8 h-8 text-green-400" />
+                    </div>
+                    <p className="text-lg font-semibold text-green-400">{setupMessage}</p>
+                    <button
+                      onClick={closeSetupWizard}
+                      className="mt-4 px-6 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                    >
+                      Done
+                    </button>
+                  </div>
+                )}
+
+                {/* ── GOOGLE FLOW ── */}
+                {showSetup === "google" && setupStep === "init" && (
+                  <div className="text-center py-4">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-400" />
+                    <p className="text-gray-400">Checking credentials...</p>
+                  </div>
+                )}
+
+                {showSetup === "google" && setupStep === "google-credentials" && (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
+                      <p className="font-semibold text-blue-400 mb-2">Step 1: Create OAuth Credentials</p>
+                      <ol className="list-decimal list-inside text-gray-400 space-y-1">
+                        <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" className="text-blue-400 underline">Google Cloud Console</a></li>
+                        <li>Create a project (or select existing)</li>
+                        <li>Click &quot;Create Credentials&quot; → &quot;OAuth client ID&quot;</li>
+                        <li>Application type: &quot;Desktop app&quot;</li>
+                        <li>Download the JSON file</li>
+                        <li>Paste the JSON contents below</li>
+                      </ol>
+                    </div>
+                    <textarea
+                      value={setupData.credentialsJson || ""}
+                      onChange={(e) => setSetupData((p: any) => ({ ...p, credentialsJson: e.target.value }))}
+                      placeholder='Paste the credentials JSON here (starts with {"installed":...})'
+                      rows={6}
+                      className="w-full p-3 bg-white/5 border border-white/10 rounded-xl text-sm font-mono text-white resize-none"
+                    />
+                    <button
+                      onClick={googleSaveCredentials}
+                      disabled={setupWorking}
+                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      {setupWorking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Save Credentials
+                    </button>
+                  </div>
+                )}
+
+                {showSetup === "google" && setupStep === "google-email" && (
+                  <div className="space-y-4">
+                    {setupMessage && (
+                      <div className="p-2 bg-green-500/10 border border-green-500/30 rounded-lg text-sm text-green-400">
+                        ✓ {setupMessage}
+                      </div>
+                    )}
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
+                      <p className="font-semibold text-blue-400 mb-1">Step 2: Enter your Gmail address</p>
+                      <p className="text-gray-400">This will start the OAuth authorization flow.</p>
+                    </div>
+                    <input
+                      type="email"
+                      value={setupData.email || ""}
+                      onChange={(e) => setSetupData((p: any) => ({ ...p, email: e.target.value }))}
+                      onKeyDown={(e) => e.key === "Enter" && googleStartAuth()}
+                      placeholder="you@gmail.com"
+                      className="w-full p-3 bg-white/5 border border-white/10 rounded-xl text-white"
+                    />
+                    <button
+                      onClick={googleStartAuth}
+                      disabled={setupWorking}
+                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      {setupWorking ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                      Start Authorization
+                    </button>
+                  </div>
+                )}
+
+                {showSetup === "google" && setupStep === "google-authorize" && (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
+                      <p className="font-semibold text-blue-400 mb-1">Step 3: Authorize in your browser</p>
+                      <p className="text-gray-400">{setupMessage}</p>
+                    </div>
+                    <a
+                      href={setupAuthUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-center transition-colors text-blue-400"
+                    >
+                      <ExternalLink className="w-4 h-4 inline mr-2" />
+                      Open Google Sign-In
+                    </a>
+                    <div className="border-t border-white/10 pt-4">
+                      <p className="text-sm text-gray-400 mb-2">After authorizing, paste the redirect URL from your browser:</p>
+                      <input
+                        type="text"
+                        value={setupData.redirectUrl || ""}
+                        onChange={(e) => setSetupData((p: any) => ({ ...p, redirectUrl: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && googleCompleteAuth()}
+                        placeholder="https://localhost/..."
+                        className="w-full p-3 bg-white/5 border border-white/10 rounded-xl text-sm text-white font-mono"
+                      />
+                    </div>
+                    <button
+                      onClick={googleCompleteAuth}
+                      disabled={setupWorking}
+                      className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      {setupWorking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      Complete Authorization
+                    </button>
+                  </div>
+                )}
+
+                {/* ── GITHUB FLOW ── */}
+                {showSetup === "github" && setupStep === "init" && (
+                  <div className="text-center py-4">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-gray-400" />
+                    <p className="text-gray-400">Checking GitHub CLI...</p>
+                  </div>
+                )}
+
+                {showSetup === "github" && setupStep === "github-token" && (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm">
+                      <p className="font-semibold text-blue-400 mb-1">Create a Personal Access Token</p>
+                      <p className="text-gray-400">{setupMessage}</p>
+                    </div>
+                    <a
+                      href={setupAuthUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg text-center transition-colors text-blue-400"
+                    >
+                      <ExternalLink className="w-4 h-4 inline mr-2" />
+                      Open GitHub → Create Token
+                    </a>
+                    <div className="border-t border-white/10 pt-4">
+                      <p className="text-sm text-gray-400 mb-2">Paste your token here:</p>
+                      <input
+                        type="password"
+                        value={setupData.token || ""}
+                        onChange={(e) => setSetupData((p: any) => ({ ...p, token: e.target.value }))}
+                        onKeyDown={(e) => e.key === "Enter" && githubComplete()}
+                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                        className="w-full p-3 bg-white/5 border border-white/10 rounded-xl text-sm text-white font-mono"
+                      />
+                    </div>
+                    <button
+                      onClick={githubComplete}
+                      disabled={setupWorking}
+                      className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      {setupWorking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      Connect GitHub
+                    </button>
+                  </div>
+                )}
+
+                {/* ── SIMPLE SERVICES (Reminders, Things, iMessage) ── */}
+                {(showSetup === "apple-reminders" || showSetup === "things" || showSetup === "imessage") && setupStep === "init" && (
+                  <div className="text-center py-4">
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-gray-400" />
+                    <p className="text-gray-400">Checking access...</p>
+                  </div>
+                )}
+
+                {setupStep === "instructions" && (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm">
+                      <p className="font-semibold text-yellow-400 mb-2">Manual Setup Required</p>
+                      <p className="text-gray-400 mb-3">{setupError}</p>
+                      {setupData.steps && (
+                        <ol className="list-decimal list-inside text-gray-400 space-y-1">
+                          {setupData.steps.map((s: string, i: number) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setSetupStep("init"); setSetupError(""); }}
+                      className="w-full py-3 bg-white/10 hover:bg-white/20 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Check Again
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              {setupStep !== "success" && (
+                <div className="p-4 border-t border-white/10 flex justify-end">
+                  <button
+                    onClick={closeSetupWizard}
+                    className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Settings Modal */}
       <AnimatePresence>
