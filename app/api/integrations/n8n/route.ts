@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
+import { execSync } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -11,6 +12,32 @@ async function getConfig() {
     return JSON.parse(data);
   } catch {
     return {};
+  }
+}
+
+// Use curl instead of fetch to work around macOS local network permissions
+function curlGet(url: string, apiKey: string): any {
+  try {
+    const result = execSync(
+      `curl -s --max-time 10 -H "X-N8N-API-KEY: ${apiKey}" "${url}"`,
+      { encoding: "utf-8" }
+    );
+    return JSON.parse(result);
+  } catch (e: any) {
+    throw new Error(`Request failed: ${e.message}`);
+  }
+}
+
+function curlPost(url: string, apiKey: string, body?: object): any {
+  try {
+    const bodyArg = body ? `-d '${JSON.stringify(body)}'` : "";
+    const result = execSync(
+      `curl -s --max-time 10 -X POST -H "X-N8N-API-KEY: ${apiKey}" -H "Content-Type: application/json" ${bodyArg} "${url}"`,
+      { encoding: "utf-8" }
+    );
+    return result ? JSON.parse(result) : {};
+  } catch (e: any) {
+    throw new Error(`Request failed: ${e.message}`);
   }
 }
 
@@ -28,19 +55,14 @@ export async function POST(request: Request) {
     });
   }
 
-  const headers = {
-    "X-N8N-API-KEY": n8nKey,
-    "Content-Type": "application/json",
-  };
-
   try {
     switch (action) {
       case "list-workflows":
-        return await listWorkflows(n8nUrl, headers);
+        return listWorkflows(n8nUrl, n8nKey);
       case "trigger":
-        return await triggerWorkflow(n8nUrl, headers, workflowId);
+        return triggerWorkflow(n8nUrl, n8nKey, workflowId);
       case "status":
-        return await getStatus(n8nUrl, headers);
+        return getStatus(n8nUrl, n8nKey);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -52,17 +74,8 @@ export async function POST(request: Request) {
   }
 }
 
-async function listWorkflows(baseUrl: string, headers: Record<string, string>) {
-  const res = await fetch(`${baseUrl}/api/v1/workflows`, {
-    headers,
-    signal: AbortSignal.timeout(10000),
-  });
-
-  if (!res.ok) {
-    throw new Error(`N8N API error: ${res.status}`);
-  }
-
-  const data = await res.json();
+function listWorkflows(baseUrl: string, apiKey: string) {
+  const data = curlGet(`${baseUrl}/api/v1/workflows`, apiKey);
   
   return NextResponse.json({
     success: true,
@@ -70,40 +83,25 @@ async function listWorkflows(baseUrl: string, headers: Record<string, string>) {
   });
 }
 
-async function triggerWorkflow(
-  baseUrl: string,
-  headers: Record<string, string>,
-  workflowId: string
-) {
+function triggerWorkflow(baseUrl: string, apiKey: string, workflowId: string) {
   if (!workflowId) {
     return NextResponse.json({ error: "Workflow ID required" }, { status: 400 });
   }
 
-  // First, get the workflow to find its webhook URL or trigger it via API
-  const res = await fetch(`${baseUrl}/api/v1/workflows/${workflowId}/activate`, {
-    method: "POST",
-    headers,
-    signal: AbortSignal.timeout(10000),
-  });
+  curlPost(`${baseUrl}/api/v1/workflows/${workflowId}/activate`, apiKey);
 
-  // Try to trigger via webhook if the workflow has one
-  // For now, just return success if the workflow exists
   return NextResponse.json({
     success: true,
     message: `Triggered workflow ${workflowId}`,
   });
 }
 
-async function getStatus(baseUrl: string, headers: Record<string, string>) {
+function getStatus(baseUrl: string, apiKey: string) {
   try {
-    const res = await fetch(`${baseUrl}/api/v1/workflows`, {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    });
-
+    curlGet(`${baseUrl}/api/v1/workflows`, apiKey);
     return NextResponse.json({
       success: true,
-      connected: res.ok,
+      connected: true,
     });
   } catch {
     return NextResponse.json({

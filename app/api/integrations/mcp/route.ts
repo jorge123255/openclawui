@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
+import { execSync } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -17,6 +18,27 @@ async function getConfig() {
   }
 }
 
+// Use curl instead of fetch to work around macOS local network permissions
+function curlJsonRpc(url: string, method: string, params: object, timeoutSec = 10): any {
+  try {
+    const payload = JSON.stringify({
+      jsonrpc: "2.0",
+      method,
+      params,
+      id: 1,
+    });
+    // Escape single quotes in payload for shell
+    const escapedPayload = payload.replace(/'/g, "'\"'\"'");
+    const result = execSync(
+      `curl -s --max-time ${timeoutSec} -X POST -H "Content-Type: application/json" -d '${escapedPayload}' "${url}/mcp"`,
+      { encoding: "utf-8" }
+    );
+    return JSON.parse(result);
+  } catch (e: any) {
+    throw new Error(`Request failed: ${e.message}`);
+  }
+}
+
 export async function POST(request: Request) {
   const { action, tool, args } = await request.json();
 
@@ -26,11 +48,11 @@ export async function POST(request: Request) {
   try {
     switch (action) {
       case "list-tools":
-        return await listTools(mcpUrl);
+        return listTools(mcpUrl);
       case "call-tool":
-        return await callTool(mcpUrl, tool, args);
+        return callTool(mcpUrl, tool, args);
       case "status":
-        return await getStatus(mcpUrl);
+        return getStatus(mcpUrl);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -42,26 +64,9 @@ export async function POST(request: Request) {
   }
 }
 
-async function listTools(mcpUrl: string) {
+function listTools(mcpUrl: string) {
   try {
-    // Call the MCP server's tools/list endpoint
-    const res = await fetch(`${mcpUrl}/mcp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "tools/list",
-        params: {},
-        id: 1,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`MCP server error: ${res.status}`);
-    }
-
-    const data = await res.json();
+    const data = curlJsonRpc(mcpUrl, "tools/list", {});
     
     // Parse the tools from the response
     const tools = data.result?.tools || [];
@@ -90,32 +95,16 @@ async function listTools(mcpUrl: string) {
   }
 }
 
-async function callTool(mcpUrl: string, tool: string, args: any) {
+function callTool(mcpUrl: string, tool: string, args: any) {
   if (!tool) {
     return NextResponse.json({ error: "Tool name required" }, { status: 400 });
   }
 
   try {
-    const res = await fetch(`${mcpUrl}/mcp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: {
-          name: tool,
-          arguments: args || {},
-        },
-        id: 1,
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-
-    if (!res.ok) {
-      throw new Error(`MCP server error: ${res.status}`);
-    }
-
-    const data = await res.json();
+    const data = curlJsonRpc(mcpUrl, "tools/call", {
+      name: tool,
+      arguments: args || {},
+    }, 30);
 
     return NextResponse.json({
       success: true,
@@ -129,23 +118,12 @@ async function callTool(mcpUrl: string, tool: string, args: any) {
   }
 }
 
-async function getStatus(mcpUrl: string) {
+function getStatus(mcpUrl: string) {
   try {
-    const res = await fetch(`${mcpUrl}/mcp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "tools/list",
-        params: {},
-        id: 1,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-
+    curlJsonRpc(mcpUrl, "tools/list", {}, 5);
     return NextResponse.json({
       success: true,
-      connected: res.ok,
+      connected: true,
     });
   } catch {
     return NextResponse.json({

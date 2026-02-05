@@ -26,6 +26,14 @@ interface Session {
   messageCount?: number;
   model?: string;
   channel?: string;
+  // Fields from actual CLI output
+  sessionId?: string;
+  updatedAt?: number;
+  ageMs?: number;
+  totalTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  contextTokens?: number;
 }
 
 export default function SessionsPage() {
@@ -78,9 +86,10 @@ export default function SessionsPage() {
     setHistoryLoading(false);
   }
 
-  function formatTime(timestamp: string | undefined) {
+  function formatTime(timestamp: string | number | undefined) {
     if (!timestamp) return "";
     const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return "";
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     
@@ -90,8 +99,16 @@ export default function SessionsPage() {
     return date.toLocaleDateString();
   }
 
-  const mainSessions = sessions.filter(s => s.kind === "main" || !s.kind);
-  const subagentSessions = sessions.filter(s => s.kind === "isolated" || s.kind === "subagent");
+  // Sessions from the API have kind="direct" — categorize by key pattern instead
+  const mainSessions = sessions.filter(s => {
+    const key = s.key || "";
+    // Main sessions: direct user sessions (main:main, webchat, default, etc.)
+    return !key.includes(":subagent:") && !key.includes(":isolated:");
+  });
+  const subagentSessions = sessions.filter(s => {
+    const key = s.key || "";
+    return key.includes(":subagent:") || key.includes(":isolated:");
+  });
 
   if (loading) {
     return (
@@ -254,6 +271,30 @@ export default function SessionsPage() {
   );
 }
 
+function friendlySessionName(key: string): string {
+  if (key.includes(":main:main")) return "Main Session";
+  if (key.includes(":webchat")) return "Web Chat";
+  if (key.includes(":subagent:")) {
+    const id = key.split(":subagent:")[1]?.substring(0, 8);
+    return `Sub-agent ${id || ""}`;
+  }
+  if (key === "default") return "Default Session";
+  // Extract last meaningful part
+  const parts = key.split(":");
+  return parts[parts.length - 1]?.substring(0, 16) || key.substring(0, 20);
+}
+
+function formatAge(ageMs?: number): string {
+  if (!ageMs) return "";
+  const mins = Math.floor(ageMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function SessionCard({
   session,
   selected,
@@ -265,6 +306,16 @@ function SessionCard({
   onClick: () => void;
   formatTime: (t: string | undefined) => string;
 }) {
+  const name = session.label || friendlySessionName(session.key);
+  const tokens = session.totalTokens
+    ? `${(session.totalTokens / 1000).toFixed(1)}k tokens`
+    : null;
+  const lastActive = session.updatedAt
+    ? formatTime(new Date(session.updatedAt).toISOString())
+    : session.ageMs
+    ? formatAge(session.ageMs)
+    : "";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -278,25 +329,21 @@ function SessionCard({
     >
       <div className="flex items-start justify-between mb-2">
         <div>
-          <h4 className="font-medium">{session.label || session.key}</h4>
+          <h4 className="font-medium">{name}</h4>
           <p className="text-xs text-muted-foreground">
-            {session.channel && <span className="capitalize">{session.channel} • </span>}
             {session.model && <span>{session.model}</span>}
+            {session.model && tokens && <span> · </span>}
+            {tokens && <span>{tokens}</span>}
           </p>
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="w-3 h-3" />
-          {formatTime(session.lastMessageAt)}
+          {lastActive}
         </div>
       </div>
-      {session.lastMessage && (
-        <p className="text-sm text-muted-foreground truncate">
-          {session.lastMessage}
-        </p>
-      )}
       <div className="flex items-center justify-between mt-2">
-        <span className="text-xs text-muted-foreground">
-          {session.messageCount || 0} messages
+        <span className="text-xs text-muted-foreground font-mono">
+          {session.sessionId?.substring(0, 8) || session.key.substring(0, 20)}
         </span>
         <ChevronRight className="w-4 h-4 text-muted-foreground" />
       </div>

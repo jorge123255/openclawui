@@ -97,6 +97,13 @@ const WIZARD_CONFIGS: Record<string, WizardStep> = {
       { key: "env.MCP_SERVER_URL", label: "Server URL", type: "url", placeholder: "http://localhost:3000", required: true },
     ],
   },
+  "mcp-tools": {
+    service: "mcp-tools",
+    name: "MCP Tools Server",
+    fields: [
+      { key: "env.MCP_SERVER_URL", label: "Server URL", type: "url", placeholder: "http://localhost:3000", required: true },
+    ],
+  },
 };
 
 export default function IntegrationsPage() {
@@ -122,8 +129,8 @@ export default function IntegrationsPage() {
   async function loadIntegrations() {
     setLoading(true);
     
-    // Load config
     try {
+      // Load config
       const res = await fetch("/api/gateway", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -134,17 +141,18 @@ export default function IntegrationsPage() {
         setConfig(data.config);
         buildIntegrationsList(data.config);
       }
+
+      // Load N8N workflows (fire and forget, don't block)
+      loadN8nWorkflows().catch(e => console.error("N8N load error:", e));
+      
+      // Load MCP tools (fire and forget, don't block)
+      loadMcpTools().catch(e => console.error("MCP load error:", e));
     } catch (e) {
       console.error("Failed to load config:", e);
+    } finally {
+      // Always stop loading
+      setLoading(false);
     }
-
-    // Load N8N workflows
-    await loadN8nWorkflows();
-    
-    // Load MCP tools
-    await loadMcpTools();
-    
-    setLoading(false);
   }
 
   async function scanForServices() {
@@ -520,6 +528,8 @@ export default function IntegrationsPage() {
             <IntegrationCard
               key={integration.id}
               integration={integration}
+              onConfigure={() => openWizard(integration.id)}
+              hasWizard={!!WIZARD_CONFIGS[integration.id]}
             />
           ))}
           
@@ -659,7 +669,15 @@ export default function IntegrationsPage() {
   );
 }
 
-function IntegrationCard({ integration }: { integration: Integration }) {
+function IntegrationCard({ 
+  integration, 
+  onConfigure,
+  hasWizard 
+}: { 
+  integration: Integration;
+  onConfigure?: () => void;
+  hasWizard?: boolean;
+}) {
   const statusColors = {
     connected: "bg-accent text-accent",
     disconnected: "bg-muted text-muted-foreground",
@@ -710,12 +728,21 @@ function IntegrationCard({ integration }: { integration: Integration }) {
       </div>
       
       <div className="mt-4 pt-4 border-t border-border flex justify-end">
-        <Link
-          href="/settings"
-          className="text-sm text-primary hover:underline flex items-center gap-1"
-        >
-          Configure <ChevronRight className="w-3 h-3" />
-        </Link>
+        {hasWizard && onConfigure ? (
+          <button
+            onClick={onConfigure}
+            className="text-sm text-primary hover:underline flex items-center gap-1"
+          >
+            Configure <ChevronRight className="w-3 h-3" />
+          </button>
+        ) : (
+          <Link
+            href="/settings"
+            className="text-sm text-primary hover:underline flex items-center gap-1"
+          >
+            Configure <ChevronRight className="w-3 h-3" />
+          </Link>
+        )}
       </div>
     </motion.div>
   );

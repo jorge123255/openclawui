@@ -52,6 +52,7 @@ export async function GET() {
   try {
     const { stdout } = await execAsync("/usr/local/bin/clawdbot sessions list --json", {
       timeout: 5000,
+      env: { ...process.env, HOME: homedir() },
     });
     const data = JSON.parse(stdout);
     status.sessions.count = data.count || data.sessions?.length || 0;
@@ -64,8 +65,9 @@ export async function GET() {
 
   // Get cron count
   try {
-    const { stdout } = await execAsync("/usr/local/bin/clawdbot cron list --all --json", {
-      timeout: 5000,
+    const { stdout, stderr } = await execAsync("/usr/local/bin/clawdbot cron list --all --json", {
+      timeout: 10000,
+      env: { ...process.env, HOME: homedir() },
     });
     const data = JSON.parse(stdout);
     const jobs = data.jobs || [];
@@ -77,6 +79,18 @@ export async function GET() {
   try {
     status.memory.backend = config.memory?.backend || "sqlite";
     status.memory.qmdEnabled = status.memory.backend === "qmd";
+    // Count memory files
+    const { readdirSync } = require("fs");
+    const workspaceDir = config.workspace?.dir || join(homedir(), "clawd");
+    const memoryDir = join(workspaceDir, "memory");
+    try {
+      const files = readdirSync(memoryDir).filter((f: string) => f.endsWith(".md"));
+      // Add MEMORY.md from workspace root
+      const hasMemoryMd = require("fs").existsSync(join(workspaceDir, "MEMORY.md"));
+      status.memory.files = files.length + (hasMemoryMd ? 1 : 0);
+    } catch {
+      status.memory.files = 0;
+    }
   } catch {}
 
   // Check Ollama
