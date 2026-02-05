@@ -470,6 +470,14 @@ async function runInstallCommand(body: any) {
       /^gem install\s/,
       /^which\s/,
       /^caffeinate/,
+      /^claude\s/,
+      /^clawdhub\s/,
+      /^gh\s/,
+      /^gog\s/,
+      /^\.\/install\.sh/,
+      /^cd\s/,
+      /^mkdir\s+-?p?\s/,
+      /^chmod\s/,
     ];
 
     const isSafe = safePatterns.some(p => p.test(command.trim()));
@@ -599,6 +607,59 @@ async function getSkillConfig(name: string) {
       const usageMatch = afterFrontmatter.match(/## Usage([\s\S]*?)(?=\n## |\n---|\n$)/);
       const quickStart = quickStartMatch?.[1]?.trim() || usageMatch?.[1]?.trim() || "";
 
+      // Extract runnable code blocks from bash/sh code fences only
+      const codeBlocks: any[] = [];
+      const codeBlockRegex = /```(?:bash|sh|zsh)\n([\s\S]*?)```/g;
+      let cbMatch;
+      const seen = new Set<string>();
+      while ((cbMatch = codeBlockRegex.exec(afterFrontmatter)) !== null) {
+        const block = cbMatch[1].trim();
+        const lines = block.split("\n").map(l => l.trim()).filter(l => {
+          if (!l || l.startsWith("#") || l.startsWith("//")) return false;
+          // Skip lines that are clearly not commands
+          if (/^\d+\.?\s+\w/.test(l)) return false;  // "1. Description"
+          if (l.startsWith("-") || l.startsWith("*")) return false;  // list items
+          if (l.startsWith("**") || l.startsWith("`")) return false;  // markdown
+          if (l === "..." || l === "---") return false;
+          // Must look like a command (starts with a word char, path, or variable)
+          if (!/^[a-zA-Z.\/~$]/.test(l)) return false;
+          return true;
+        });
+
+        for (const line of lines) {
+          if (seen.has(line)) continue;
+          seen.add(line);
+
+          // Determine if safe to run
+          const safePatterns = [
+            { pattern: /^brew install\s+\S+/, kind: "brew" },
+            { pattern: /^npm install\s/, kind: "npm" },
+            { pattern: /^pip3? install\s/, kind: "pip" },
+            { pattern: /^cargo install\s/, kind: "cargo" },
+            { pattern: /^go install\s/, kind: "go" },
+            { pattern: /^gem install\s/, kind: "gem" },
+            { pattern: /^claude\s/, kind: "cli" },
+            { pattern: /^clawdhub\s/, kind: "cli" },
+            { pattern: /^gh\s/, kind: "cli" },
+            { pattern: /^gog\s/, kind: "cli" },
+            { pattern: /^\.\/install\.sh/, kind: "script" },
+            { pattern: /^cd\s/, kind: "nav" },
+            { pattern: /^mkdir\s/, kind: "fs" },
+            { pattern: /^chmod\s/, kind: "fs" },
+            { pattern: /^cp\s/, kind: "fs" },
+            { pattern: /^cat\s/, kind: "read" },
+            { pattern: /^launchctl\s/, kind: "system" },
+          ];
+
+          const match = safePatterns.find(p => p.pattern.test(line));
+          codeBlocks.push({
+            command: line,
+            runnable: !!match,
+            kind: match?.kind || "unknown",
+          });
+        }
+      }
+
       // Check if all requirements are met
       const allMet = checks.length === 0 || checks.every(c => c.met);
 
@@ -613,6 +674,7 @@ async function getSkillConfig(name: string) {
           checks,
           allMet,
           quickStart: quickStart.slice(0, 1000),
+          codeBlocks,
           path: skillPath,
         },
       });

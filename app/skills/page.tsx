@@ -691,18 +691,63 @@ export default function SkillsPage() {
                     </div>
                   )}
 
-                  {/* Quick Start */}
-                  {configSkill.quickStart && (
+                  {/* Code Blocks (parsed from SKILL.md) */}
+                  {configSkill.codeBlocks?.length > 0 && (
                     <div>
-                      <h3 className="font-semibold mb-2 text-sm">Quick Start</h3>
-                      <pre className="p-3 bg-black/30 rounded-lg text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap">
-                        {configSkill.quickStart}
-                      </pre>
+                      <h3 className="font-semibold mb-2 text-sm">Setup Commands</h3>
+                      <div className="space-y-1.5">
+                        {configSkill.codeBlocks.map((block: any, i: number) => (
+                          <div key={i} className="flex items-center gap-2 p-2 bg-black/30 rounded-lg group">
+                            <code className="flex-1 text-xs text-gray-300 font-mono truncate" title={block.command}>
+                              <span className="text-gray-600 mr-1">$</span>
+                              {block.command}
+                            </code>
+                            {block.runnable ? (
+                              <button
+                                onClick={() => {
+                                  setCmdOutput(null);
+                                  setRunningCmd(block.command);
+                                  fetch("/api/skills", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ action: "run-command", command: block.command }),
+                                  }).then(r => r.json()).then(data => {
+                                    setCmdOutput({
+                                      cmd: block.command,
+                                      output: data.output || data.stderr || data.error || "Done",
+                                      success: data.success !== false,
+                                    });
+                                    setRunningCmd(null);
+                                    if (data.success && configSkill) {
+                                      setTimeout(() => openConfig(configSkill.dirName), 1500);
+                                    }
+                                  }).catch(e => {
+                                    setCmdOutput({ cmd: block.command, output: e.message, success: false });
+                                    setRunningCmd(null);
+                                  });
+                                }}
+                                disabled={runningCmd !== null}
+                                className="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 rounded text-xs text-yellow-400 transition-colors flex-shrink-0 opacity-60 group-hover:opacity-100"
+                              >
+                                {runningCmd === block.command ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  "▶ Run"
+                                )}
+                              </button>
+                            ) : (
+                              <span className="px-2 py-1 text-xs text-gray-600 flex-shrink-0">
+                                manual
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
                   {/* No config needed */}
-                  {configSkill.checks?.length === 0 && !configSkill.installSteps?.length && (
+                  {configSkill.checks?.length === 0 && !configSkill.installSteps?.length && !configSkill.codeBlocks?.length && (
                     <div className="text-center py-4 text-gray-400">
                       <p>No special configuration needed.</p>
                       <p className="text-sm mt-1">This skill works out of the box!</p>
