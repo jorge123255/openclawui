@@ -27,20 +27,27 @@ interface InstalledConnection {
   status: "connected" | "disconnected" | "checking";
   setupSteps?: string[];
   details?: any;
+  source: "user" | "builtin"; // where the skill was found
 }
 
-async function getInstalledSkills(): Promise<Set<string>> {
-  const skills = new Set<string>();
-  for (const dir of SKILL_DIRS) {
+// Returns map of skillName → "user" | "builtin" (user takes priority)
+async function getInstalledSkills(): Promise<Map<string, "user" | "builtin">> {
+  const skills = new Map<string, "user" | "builtin">();
+  for (let i = 0; i < SKILL_DIRS.length; i++) {
+    const dir = SKILL_DIRS[i];
+    // First dir is builtin (clawdbot-fix/skills), second is user (clawd/skills)
+    const source: "user" | "builtin" = i === 0 ? "builtin" : "user";
     try {
       const entries = await readdir(dir);
       for (const entry of entries) {
-        // Verify it's a skill (has SKILL.md)
         try {
           await access(join(dir, entry, "SKILL.md"));
-          skills.add(entry);
+          // User dir overrides builtin
+          if (source === "user" || !skills.has(entry)) {
+            skills.set(entry, source);
+          }
         } catch {
-          // Not a skill directory, skip
+          // Not a skill directory
         }
       }
     } catch {
@@ -89,8 +96,8 @@ export async function GET() {
     const connections: InstalledConnection[] = [];
 
     // Match installed skills to registry entries
-    const skillArray = Array.from(installedSkills);
-    for (const skillName of skillArray) {
+    const skillEntries = Array.from(installedSkills.entries());
+    for (const [skillName, source] of skillEntries) {
       const def = SKILL_TO_CONNECTION.get(skillName);
       if (def) {
         const status = await checkConnection(def);
@@ -105,6 +112,7 @@ export async function GET() {
           authType: def.auth.type,
           status,
           setupSteps: def.auth.setupSteps,
+          source,
         });
       } else {
         // Skill installed but not in registry — show as "no setup needed"
@@ -118,6 +126,7 @@ export async function GET() {
           category: "other",
           authType: "none",
           status: "connected",
+          source,
         });
       }
     }

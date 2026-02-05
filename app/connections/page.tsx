@@ -75,6 +75,7 @@ interface Connection {
   authType: string;
   status: "connected" | "disconnected" | "checking";
   setupSteps?: string[];
+  source?: "user" | "builtin";
 }
 
 const COLOR_CLASSES: Record<string, string> = {
@@ -291,8 +292,18 @@ export default function ConnectionsPage() {
     }
   }, [showSetup]);
 
-  // Group connections by category
-  const grouped = connections.reduce((acc, conn) => {
+  // Split: active (connected OR user-installed) vs available (builtin + disconnected)
+  const activeConnections = connections.filter(
+    c => c.status === "connected" || c.source === "user"
+  );
+  const availableConnections = connections.filter(
+    c => c.status === "disconnected" && c.source === "builtin"
+  );
+
+  const [showAvailable, setShowAvailable] = useState(false);
+
+  // Group active connections by category
+  const grouped = activeConnections.reduce((acc, conn) => {
     const cat = conn.category || "other";
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(conn);
@@ -339,11 +350,15 @@ export default function ConnectionsPage() {
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-8">
           <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
-            <div className="text-2xl font-bold text-green-400">{stats.connected}</div>
+            <div className="text-2xl font-bold text-green-400">
+              {activeConnections.filter(c => c.status === "connected").length}
+            </div>
             <div className="text-sm text-gray-400">Connected</div>
           </div>
           <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
-            <div className="text-2xl font-bold text-yellow-400">{stats.disconnected}</div>
+            <div className="text-2xl font-bold text-yellow-400">
+              {activeConnections.filter(c => c.status === "disconnected").length}
+            </div>
             <div className="text-sm text-gray-400">Needs Setup</div>
           </div>
           <div className="p-4 rounded-xl bg-white/5 border border-white/10 text-center">
@@ -428,6 +443,45 @@ export default function ConnectionsPage() {
               </div>
             </div>
           ))
+        )}
+
+        {/* Available to Set Up (collapsed) */}
+        {!loading && availableConnections.length > 0 && (
+          <div className="mt-8">
+            <button
+              onClick={() => setShowAvailable(!showAvailable)}
+              className="flex items-center gap-2 text-gray-400 hover:text-gray-300 transition-colors mb-4"
+            >
+              <span className="text-sm font-semibold">
+                {showAvailable ? "▼" : "▶"} Available to Set Up ({availableConnections.length})
+              </span>
+            </button>
+            {showAvailable && (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {availableConnections.map((conn) => {
+                  const Icon = IconFor(conn.icon);
+                  return (
+                    <div
+                      key={conn.id}
+                      className="p-3 rounded-xl bg-white/[0.03] border border-white/5 flex items-center gap-3"
+                    >
+                      <Icon className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-400">{conn.name}</p>
+                        <p className="text-xs text-gray-600 truncate">{conn.description}</p>
+                      </div>
+                      <button
+                        onClick={() => openSetupWizard(conn)}
+                        className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-400 transition-colors flex-shrink-0"
+                      >
+                        Setup
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Link to Skills Store */}
