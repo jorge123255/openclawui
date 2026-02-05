@@ -37,6 +37,10 @@ interface CronJob {
   enabled: boolean;
   lastRun?: string;
   nextRun?: string;
+  delivery?: {
+    mode: "announce" | "none";
+  };
+  cleanup?: string;
 }
 
 export default function CronPage() {
@@ -51,6 +55,8 @@ export default function CronPage() {
     atTime: "",
     payloadText: "",
     sessionTarget: "main" as "main" | "isolated",
+    deliveryMode: "announce" as "announce" | "none",
+    autoDelete: true,
   });
   const [saving, setSaving] = useState(false);
 
@@ -128,7 +134,7 @@ export default function CronPage() {
       schedule.atMs = new Date(newJob.atTime).getTime();
     }
 
-    const job = {
+    const job: any = {
       name: newJob.name || undefined,
       schedule,
       payload: {
@@ -139,6 +145,16 @@ export default function CronPage() {
       sessionTarget: newJob.sessionTarget,
       enabled: true,
     };
+
+    // Add delivery mode if isolated session
+    if (newJob.sessionTarget === "isolated") {
+      job.delivery = { mode: newJob.deliveryMode };
+    }
+
+    // Add cleanup setting if auto-delete is disabled for one-time jobs
+    if (newJob.scheduleKind === "at" && !newJob.autoDelete) {
+      job.cleanup = "keep";
+    }
 
     try {
       const res = await fetch("/api/cron", {
@@ -158,6 +174,8 @@ export default function CronPage() {
           atTime: "",
           payloadText: "",
           sessionTarget: "main",
+          deliveryMode: "announce",
+          autoDelete: true,
         });
         await loadJobs();
       } else {
@@ -268,6 +286,11 @@ export default function CronPage() {
                     }`}>
                       {job.sessionTarget}
                     </span>
+                    {job.delivery && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">
+                        {job.delivery.mode}
+                      </span>
+                    )}
                   </div>
                   
                   <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -434,6 +457,51 @@ export default function CronPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Delivery Mode - only show for isolated sessions */}
+              {newJob.sessionTarget === "isolated" && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">Delivery Mode</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setNewJob({ ...newJob, deliveryMode: "announce" })}
+                      className={`flex-1 py-2 rounded-lg transition-colors ${
+                        newJob.deliveryMode === "announce"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary hover:bg-secondary/80"
+                      }`}
+                    >
+                      Announce
+                    </button>
+                    <button
+                      onClick={() => setNewJob({ ...newJob, deliveryMode: "none" })}
+                      className={`flex-1 py-2 rounded-lg transition-colors ${
+                        newJob.deliveryMode === "none"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-secondary hover:bg-secondary/80"
+                      }`}
+                    >
+                      None
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Auto-delete toggle - only show for one-time jobs */}
+              {newJob.scheduleKind === "at" && (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="autoDelete"
+                    checked={newJob.autoDelete}
+                    onChange={(e) => setNewJob({ ...newJob, autoDelete: e.target.checked })}
+                    className="w-5 h-5 rounded accent-primary"
+                  />
+                  <label htmlFor="autoDelete" className="text-sm font-medium cursor-pointer">
+                    Delete after run
+                  </label>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 mt-6">

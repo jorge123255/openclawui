@@ -411,6 +411,34 @@ function ChannelsTab({
               <option value="deny">Deny all groups</option>
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Response Prefix</label>
+            <input
+              type="text"
+              value={changes["channels.telegram.responsePrefix"] ?? telegram.responsePrefix ?? ""}
+              onChange={(e) => onUpdate("channels.telegram.responsePrefix", e.target.value)}
+              placeholder="e.g. 🤖 "
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Optional prefix added to all replies in this channel
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Heartbeat Account ID</label>
+            <input
+              type="text"
+              value={changes["channels.telegram.heartbeat.accountId"] ?? telegram.heartbeat?.accountId ?? ""}
+              onChange={(e) => onUpdate("channels.telegram.heartbeat.accountId", e.target.value)}
+              placeholder="e.g. your-telegram-user-id"
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Route heartbeats to this specific account (for multi-agent setups)
+            </p>
+          </div>
         </div>
       </section>
 
@@ -454,6 +482,20 @@ function ChannelsTab({
                 {showSecrets["discord-token"] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Response Prefix</label>
+            <input
+              type="text"
+              value={changes["channels.discord.responsePrefix"] ?? discord.responsePrefix ?? ""}
+              onChange={(e) => onUpdate("channels.discord.responsePrefix", e.target.value)}
+              placeholder="e.g. 🤖 "
+              className="w-full px-4 py-2 bg-secondary rounded-lg border border-border focus:border-primary outline-none"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Optional prefix added to all replies in this channel
+            </p>
           </div>
         </div>
       </section>
