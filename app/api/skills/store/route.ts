@@ -119,8 +119,8 @@ function parseReadme(readme: string): Category[] {
         const url = sm[2];
         const description = sm[3] || "";
         
-        // Extract slug from URL
-        const slugMatch = url.match(/skills\/([^/]+)\/([^/]+)/);
+        // Extract slug from URL (match after /main/ or /master/ to skip repo name "skills")
+        const slugMatch = url.match(/\/(?:main|master)\/skills\/([^/]+)\/([^/]+)/);
         const author = slugMatch?.[1] || "";
         const slug = slugMatch?.[2] || skillName;
 

@@ -421,8 +421,8 @@ export default function SkillsPage() {
                       key={skill.slug}
                       skill={skill}
                       installed={isInstalled(skill.slug || skill.name)}
-                      installing={installing === skill.slug}
-                      onInstall={() => installSkill(skill.slug || skill.name)}
+                      installing={installing === (skill.author ? `${skill.author}/${skill.slug}` : skill.slug)}
+                      onInstall={() => installSkill(skill.author ? `${skill.author}/${skill.slug}` : (skill.slug || skill.name))}
                     />
                   ))}
                 </div>
@@ -437,8 +437,8 @@ export default function SkillsPage() {
                       key={skill.slug}
                       skill={skill}
                       installed={isInstalled(skill.slug || skill.name)}
-                      installing={installing === skill.slug}
-                      onInstall={() => installSkill(skill.slug || skill.name)}
+                      installing={installing === (skill.author ? `${skill.author}/${skill.slug}` : skill.slug)}
+                      onInstall={() => installSkill(skill.author ? `${skill.author}/${skill.slug}` : (skill.slug || skill.name))}
                     />
                   ))}
               </div>

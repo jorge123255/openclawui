@@ -261,54 +261,117 @@ async function installSkill(name: string) {
     return NextResponse.json({ error: "Skill name required" }, { status: 400 });
   }
 
-  const targetDir = join(homedir(), "clawd", "skills", name);
+  // name might be "author/skill" for store skills or just "skill" for official
+  const parts = name.split("/");
+  const skillName = parts.length > 1 ? parts[1] : parts[0];
+  const author = parts.length > 1 ? parts[0] : null;
+  const targetDir = join(homedir(), "clawd", "skills", skillName);
 
   try {
     // Method 1: Try clawdhub CLI
     try {
-      const { stdout } = await execAsync(`clawdhub install ${name}`, {
+      const { stdout } = await execAsync(`clawdhub install ${skillName}`, {
         timeout: 60000,
       });
       return NextResponse.json({
         success: true,
-        message: `Installed ${name}`,
+        message: `Installed ${skillName}`,
         output: stdout,
       });
     } catch (e) {
-      // clawdhub failed, try git clone
-    }
-
-    // Method 2: Clone from OpenClaw GitHub repo
-    // First check if skill exists in repo
-    const checkRes = await fetch(
-      `https://api.github.com/repos/openclaw/openclaw/contents/skills/${name}`,
-      { headers: { "User-Agent": "OpenClawUI" } }
-    );
-    
-    if (!checkRes.ok) {
-      return NextResponse.json({
-        success: false,
-        error: `Skill "${name}" not found in OpenClaw repository`,
-      });
+      // clawdhub failed, try git
     }
 
     // Create skills directory if needed
     await execAsync(`mkdir -p "${join(homedir(), "clawd", "skills")}"`);
 
-    // Use sparse checkout to get just this skill
-    const tempDir = `/tmp/openclaw-skill-${Date.now()}`;
-    await execAsync(`
-      git clone --depth 1 --filter=blob:none --sparse \
-        https://github.com/openclaw/openclaw.git "${tempDir}" && \
-      cd "${tempDir}" && \
-      git sparse-checkout set "skills/${name}" && \
-      cp -r "skills/${name}" "${targetDir}" && \
-      rm -rf "${tempDir}"
-    `, { timeout: 120000 });
+    // Method 2: Try community skills repo (openclaw/skills) with author path
+    if (author) {
+      try {
+        const checkRes = await fetch(
+          `https://api.github.com/repos/openclaw/skills/contents/skills/${author}/${skillName}`,
+          { headers: { "User-Agent": "OpenClawUI" } }
+        );
+        if (checkRes.ok) {
+          const tempDir = `/tmp/openclaw-skill-${Date.now()}`;
+          await execAsync(`
+            git clone --depth 1 --filter=blob:none --sparse \
+              https://github.com/openclaw/skills.git "${tempDir}" && \
+            cd "${tempDir}" && \
+            git sparse-checkout set "skills/${author}/${skillName}" && \
+            cp -r "skills/${author}/${skillName}" "${targetDir}" && \
+            rm -rf "${tempDir}"
+          `, { timeout: 120000 });
+
+          return NextResponse.json({
+            success: true,
+            message: `Installed ${skillName} (by ${author})`,
+          });
+        }
+      } catch (e) {
+        // Try next method
+      }
+    }
+
+    // Method 3: Try official repo (openclaw/openclaw)
+    const checkRes = await fetch(
+      `https://api.github.com/repos/openclaw/openclaw/contents/skills/${skillName}`,
+      { headers: { "User-Agent": "OpenClawUI" } }
+    );
+    
+    if (checkRes.ok) {
+      const tempDir = `/tmp/openclaw-skill-${Date.now()}`;
+      await execAsync(`
+        git clone --depth 1 --filter=blob:none --sparse \
+          https://github.com/openclaw/openclaw.git "${tempDir}" && \
+        cd "${tempDir}" && \
+        git sparse-checkout set "skills/${skillName}" && \
+        cp -r "skills/${skillName}" "${targetDir}" && \
+        rm -rf "${tempDir}"
+      `, { timeout: 120000 });
+
+      return NextResponse.json({
+        success: true,
+        message: `Installed ${skillName}`,
+      });
+    }
+
+    // Method 4: Try community repo without author prefix
+    try {
+      // Search community repo for skill by name
+      const searchRes = await fetch(
+        `https://api.github.com/search/code?q=${encodeURIComponent(skillName)}+path:skills+filename:SKILL.md+repo:openclaw/skills`,
+        { headers: { "User-Agent": "OpenClawUI" } }
+      );
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        if (searchData.items?.length > 0) {
+          const path = searchData.items[0].path; // e.g. "skills/author/skillname/SKILL.md"
+          const skillDir = path.replace("/SKILL.md", ""); // "skills/author/skillname"
+          
+          const tempDir = `/tmp/openclaw-skill-${Date.now()}`;
+          await execAsync(`
+            git clone --depth 1 --filter=blob:none --sparse \
+              https://github.com/openclaw/skills.git "${tempDir}" && \
+            cd "${tempDir}" && \
+            git sparse-checkout set "${skillDir}" && \
+            cp -r "${skillDir}" "${targetDir}" && \
+            rm -rf "${tempDir}"
+          `, { timeout: 120000 });
+
+          return NextResponse.json({
+            success: true,
+            message: `Installed ${skillName}`,
+          });
+        }
+      }
+    } catch (e) {
+      // Final fallback
+    }
 
     return NextResponse.json({
-      success: true,
-      message: `Installed ${name} to ${targetDir}`,
+      success: false,
+      error: `Skill "${skillName}" not found in any repository`,
     });
   } catch (e: any) {
     return NextResponse.json({
