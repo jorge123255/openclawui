@@ -90,7 +90,8 @@ function runTests(code: string, tests: string, language: string): { passed: numb
       // Write code + tests together
       const combined = `${code}\n\n${tests}`;
       require("fs").writeFileSync(`${tmpDir}/test_main.py`, combined);
-      cmd = `cd ${tmpDir} && /usr/bin/python3 -m pytest test_main.py -v 2>&1 || /usr/bin/python3 test_main.py 2>&1`;
+      // Try pytest first, fall back to plain python (no install needed)
+      cmd = `cd ${tmpDir} && (/usr/bin/python3 -m pytest test_main.py -v 2>&1 || /usr/bin/python3 test_main.py 2>&1)`;
     } else if (language === "javascript" || language === "js" || language === "typescript" || language === "ts") {
       require("fs").writeFileSync(`${tmpDir}/code.js`, code);
       require("fs").writeFileSync(`${tmpDir}/test.js`, `const code = require('./code');\n${tests}`);
@@ -116,14 +117,20 @@ function runTests(code: string, tests: string, language: string): { passed: numb
     const passed = parseInt(passedMatch?.[1] || "0");
     const failed = parseInt(failedMatch?.[1] || "0") + parseInt(errorMatch?.[1] || "0");
 
-    // If no pytest output, check for assertion errors
+    // If no pytest output, check for assertion errors / plain python
     if (!passedMatch && !failedMatch) {
-      const assertions = (output.match(/AssertionError|Error|FAIL|Traceback/gi) || []).length;
-      if (assertions > 0) {
-        return { passed: 0, failed: assertions, total: assertions, output };
+      const hasError = output.match(/AssertionError|AssertionError|Traceback|Error:|FAIL/gi);
+      const hasPass = output.match(/all tests passed|tests passed|OK/gi);
+      
+      if (hasPass && !hasError) {
+        return { passed: 1, failed: 0, total: 1, output: output };
       }
-      // If clean output (no errors), assume passed
-      if (!output.includes("Error") && !output.includes("Traceback") && !output.includes("FAIL")) {
+      if (hasError) {
+        const errorCount = (output.match(/AssertionError|AssertionError/gi) || []).length || 1;
+        return { passed: 0, failed: errorCount, total: errorCount, output };
+      }
+      // If clean exit (no errors), assume passed
+      if (!output.includes("Error") && !output.includes("Traceback") && !output.includes("FAIL") && !output.includes("assert False")) {
         return { passed: 1, failed: 0, total: 1, output: output || "All tests passed (no errors detected)" };
       }
     }
@@ -160,7 +167,19 @@ The tests should cover:
 - Error handling
 - Input validation
 
-IMPORTANT: Write tests that can run independently. Use pytest for Python, or simple assert statements.
+IMPORTANT: Write tests using ONLY simple assert statements and try/except blocks. Do NOT use pytest, unittest, or any test framework — just plain Python with assert.
+Example test format:
+\`\`\`python
+# Tests
+assert my_func(1) == 2, "should return 2"
+try:
+    my_func(None)
+    assert False, "should have raised ValueError"
+except ValueError:
+    pass
+print("All tests passed!")
+\`\`\`
+
 Put your plan in a section called "## Plan"
 Put your tests in a single code block labeled with the language (e.g. \`\`\`python)
 At the end, add a line: "Language: <language>"

@@ -56,6 +56,9 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
   const [testResults, setTestResults] = useState<AgentEvent["testResults"] | null>(null);
   const [bossModel, setBossModel] = useState("anthropic/claude-opus-4-6");
   const [workerModel, setWorkerModel] = useState("openai-codex/gpt-5.3-codex");
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const [activeThought, setActiveThought] = useState<{ agent: string; text: string } | null>(null);
+  const thoughtTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -131,6 +134,12 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
     }
   };
 
+  const showThought = (agent: string, text: string, durationMs: number = 8000) => {
+    if (thoughtTimeoutRef.current) clearTimeout(thoughtTimeoutRef.current);
+    setActiveThought({ agent, text });
+    thoughtTimeoutRef.current = setTimeout(() => setActiveThought(null), durationMs);
+  };
+
   const handleEvent = (event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
@@ -143,20 +152,45 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
             running: "running",
             diagnosing: "thinking",
           };
+          const action = event.action || "";
           updateAgent(event.agent, {
-            status: statusMap[event.action || ""] || "thinking",
+            status: statusMap[action] || "thinking",
             thought: undefined,
           });
+          // Big status text
+          const statusMessages: Record<string, Record<string, string>> = {
+            boss: { planning: "🧠 BOSS IS PLANNING...", reviewing: "🔍 BOSS IS REVIEWING CODE...", diagnosing: "🩺 BOSS IS DIAGNOSING..." },
+            worker: { coding: "💻 WORKER IS CODING...", fixing: "🔧 WORKER IS FIXING..." },
+            tester: { running: "🧪 RUNNING TESTS..." },
+          };
+          const msg = statusMessages[event.agent]?.[action];
+          if (msg) setStatusText(msg);
         }
         break;
       case "agent_thinking":
-        if (event.agent) {
+        if (event.agent && event.content) {
           updateAgent(event.agent, { thought: event.content });
+          showThought(event.agent, event.content, 10000);
         }
         break;
       case "agent_message":
         if (event.agent) {
-          updateAgent(event.agent, { status: "done", thought: undefined });
+          updateAgent(event.agent, { status: "done" });
+          // Keep thought visible for a few seconds after message arrives
+          if (event.action === "plan") {
+            showThought(event.agent, "Plan ready! Writing tests...", 5000);
+            setStatusText("📝 PLAN COMPLETE — TESTS WRITTEN");
+          } else if (event.action === "code") {
+            showThought(event.agent, "Code written! Ready for tests", 5000);
+            setStatusText("✅ CODE WRITTEN — RUNNING TESTS...");
+          } else if (event.action === "review") {
+            const approved = event.content?.includes("APPROVED");
+            showThought(event.agent, approved ? "Looks good! Approved! ✅" : "Needs work... sending feedback", 5000);
+            setStatusText(approved ? "🎉 BOSS APPROVED THE CODE!" : "📝 BOSS SENT FEEDBACK");
+          } else if (event.action === "feedback") {
+            showThought(event.agent, "Here's what to fix...", 5000);
+            setStatusText("🩺 BOSS DIAGNOSED THE ISSUE");
+          }
         }
         break;
       case "code_update":
@@ -166,20 +200,29 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
       case "test_run":
         if (event.testResults) {
           setTestResults(event.testResults);
+          const passed = event.testResults.failed === 0 && event.testResults.passed > 0;
           updateAgent("tester", {
-            status: event.testResults.failed === 0 ? "done" : "error",
-            thought: event.testResults.failed === 0
-              ? `✅ ${event.testResults.passed} passed`
+            status: passed ? "done" : "error",
+            thought: passed
+              ? `✅ ${event.testResults.passed} passed!`
               : `❌ ${event.testResults.failed} failed`,
           });
+          showThought("tester", passed ? `All ${event.testResults.passed} tests passed!` : `${event.testResults.failed} tests failed...`, 6000);
+          setStatusText(passed ? `✅ ALL TESTS PASSED! (${event.testResults.passed})` : `❌ TESTS FAILED (${event.testResults.failed} failures)`);
         }
         break;
       case "round":
         setCurrentRound(event.round || 0);
+        setStatusText(`🔄 ROUND ${event.round}`);
         break;
       case "complete":
         if (event.finalCode) setFinalCode(event.finalCode);
         if (event.tests) setFinalTests(event.tests);
+        setStatusText("🎉 BUILD COMPLETE!");
+        showThought("boss", "Ship it! 🚀", 10000);
+        break;
+      case "error":
+        setStatusText(`⚠️ ${event.content}`);
         break;
     }
   };
@@ -218,7 +261,7 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
       </div>
 
       {/* Pixel Art Office */}
-      <div className={`px-4 py-3 border-b ${border}`}>
+      <div className={`px-4 py-3 border-b ${border} relative`}>
         <PixelOffice
           activity={{
             boss: agents.boss.status === "thinking" ? (currentRound === 0 ? "planning" : "diagnosing")
@@ -236,12 +279,24 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
           }}
           round={currentRound}
           isDark={isDark}
-          thought={
-            Object.values(agents).find(a => a.thought)
-              ? { agent: Object.values(agents).find(a => a.thought)!.id, text: Object.values(agents).find(a => a.thought)!.thought! }
-              : null
-          }
+          thought={activeThought}
         />
+        {/* Status Bar Overlay */}
+        {statusText && isRunning && (
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10">
+            <div className={`px-6 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur-sm ${
+              statusText.includes("COMPLETE") || statusText.includes("APPROVED") || statusText.includes("ALL TESTS PASSED")
+                ? "bg-green-600/90 text-white"
+                : statusText.includes("FAILED")
+                ? "bg-red-600/90 text-white"
+                : statusText.includes("ROUND")
+                ? "bg-purple-600/90 text-white"
+                : "bg-gray-800/90 text-white"
+            }`} style={{ animation: "fadeIn 0.3s ease-out" }}>
+              {statusText}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Content */}

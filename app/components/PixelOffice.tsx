@@ -14,6 +14,7 @@ interface Props {
   round: number;
   isDark: boolean;
   thought?: { agent: string; text: string } | null;
+  statusText?: string | null;
 }
 
 // ─── Pixel Helpers ──────────────────────────────────────────────────────────
@@ -526,7 +527,7 @@ function drawRoundBadge(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-export default function PixelOffice({ activity, round, isDark, thought }: Props) {
+export default function PixelOffice({ activity, round, isDark, thought, statusText }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef(0);
   const animRef = useRef<number>(0);
@@ -797,7 +798,7 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
     }
 
     animRef.current = requestAnimationFrame(draw);
-  }, [activity, round, thought]);
+  }, [activity, round, thought, statusText]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
