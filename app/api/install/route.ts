@@ -1,233 +1,55 @@
 import { NextResponse } from "next/server";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
+import { execSync } from "child_process";
+import { homedir } from "os";
 
 export async function POST(request: Request) {
-  const { action, provider } = await request.json();
-
   try {
-    switch (action) {
-      case "check-node":
-        return await checkNode();
-      case "check-openclaw":
-        return await checkOpenClaw();
-      case "install-openclaw":
-        return await installOpenClaw();
-      case "install-provider":
-        return await installProvider(provider);
-      case "check-provider":
-        return await checkProvider(provider);
-      case "check-auth":
-        return await checkAuth(provider);
-      default:
-        return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-    }
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message, success: false },
-      { status: 500 }
-    );
-  }
-}
-
-async function checkOpenClaw() {
-  // Method 1: Check for global npm install
-  try {
-    const { stdout } = await execAsync("openclaw --version");
-    return NextResponse.json({
-      installed: true,
-      version: stdout.trim(),
-      source: "global",
-    });
-  } catch {
-    // Method 2: Check if gateway is running (indicates OpenClaw is available)
-    try {
-      // Use ps aux | grep which is more reliable on macOS
-      const { stdout } = await execAsync("ps aux | grep '[o]penclaw-gateway' | head -1");
-      if (stdout.trim()) {
-        // Gateway is running, get version from local install
-        try {
-          const { stdout: version } = await execAsync("node ~/clawdbot-fix/openclaw.mjs --version 2>/dev/null");
-          return NextResponse.json({
-            installed: true,
-            version: version.trim(),
-            source: "local",
-          });
-        } catch {
-          return NextResponse.json({
-            installed: true,
-            version: "running",
-            source: "local",
-          });
-        }
-      }
-      throw new Error("Gateway not found");
-    } catch {
-      return NextResponse.json({
-        installed: false,
-      });
-    }
-  }
-}
-
-async function checkNode() {
-  try {
-    const { stdout: nodeVersion } = await execAsync("node --version");
-    const { stdout: npmVersion } = await execAsync("npm --version");
-    
-    return NextResponse.json({
-      success: true,
-      node: nodeVersion.trim().replace(/^v/, ""),
-      npm: npmVersion.trim(),
-      installed: true,
-    });
-  } catch {
-    return NextResponse.json({
-      success: true,
-      installed: false,
-      message: "Node.js not found. Please install from https://nodejs.org",
-    });
-  }
-}
-
-async function installOpenClaw() {
-  try {
-    // Check if already installed
-    try {
-      const { stdout } = await execAsync("openclaw --version");
-      return NextResponse.json({
-        success: true,
-        alreadyInstalled: true,
-        version: stdout.trim(),
-      });
-    } catch {
-      // Not installed, proceed with installation
+    const { package: pkg, language } = await request.json();
+    if (!pkg) {
+      return NextResponse.json({ error: "Package name required" }, { status: 400 });
     }
 
-    // Install OpenClaw globally
-    const { stdout, stderr } = await execAsync(
-      "npm install -g openclaw",
-      { timeout: 120000 } // 2 minute timeout
-    );
+    let command: string;
+    const lang = (language || "").toLowerCase();
 
-    return NextResponse.json({
-      success: true,
-      output: stdout,
-      installed: true,
+    if (["python", "py", "python3"].includes(lang)) {
+      command = `pip3 install "${pkg}"`;
+    } else if (["javascript", "js", "node", "typescript", "ts"].includes(lang)) {
+      command = `npm install -g "${pkg}"`;
+    } else if (["ruby", "rb"].includes(lang)) {
+      command = `gem install "${pkg}"`;
+    } else if (["go", "golang"].includes(lang)) {
+      command = `go install "${pkg}@latest"`;
+    } else if (["rust", "rs"].includes(lang)) {
+      command = `cargo install "${pkg}"`;
+    } else {
+      return NextResponse.json({ error: `No package manager for ${lang}` }, { status: 400 });
+    }
+
+    const output = execSync(`${command} 2>&1`, {
+      encoding: "utf-8",
+      timeout: 120000,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        PATH: [
+          "/usr/local/opt/openjdk/bin",
+          "/usr/local/opt/php/bin",
+          "/usr/local/opt/rust/bin",
+          process.env.PATH,
+          "/usr/local/bin",
+          "/opt/homebrew/bin",
+          `${homedir()}/.cargo/bin`,
+          `${homedir()}/go/bin`,
+        ].filter(Boolean).join(":"),
+      },
     });
-  } catch (error: any) {
+
+    return NextResponse.json({ success: true, output: output.trim() });
+  } catch (e: any) {
     return NextResponse.json({
       success: false,
-      error: error.message,
-    });
-  }
-}
-
-async function installProvider(provider: string) {
-  const packages: Record<string, string> = {
-    anthropic: "@anthropic-ai/claude-code",
-    openai: "@openai/codex",
-  };
-
-  const pkg = packages[provider];
-  if (!pkg) {
-    return NextResponse.json({
-      success: false,
-      error: `Unknown provider: ${provider}`,
-    });
-  }
-
-  try {
-    // Check if already installed
-    try {
-      await execAsync(`npm list -g ${pkg}`);
-      return NextResponse.json({
-        success: true,
-        alreadyInstalled: true,
-        package: pkg,
-      });
-    } catch {
-      // Not installed, proceed
-    }
-
-    const { stdout } = await execAsync(
-      `npm install -g ${pkg}`,
-      { timeout: 120000 }
-    );
-
-    return NextResponse.json({
-      success: true,
-      output: stdout,
-      package: pkg,
-      installed: true,
-    });
-  } catch (error: any) {
-    return NextResponse.json({
-      success: false,
-      error: error.message,
-      package: pkg,
-    });
-  }
-}
-
-async function checkProvider(provider: string) {
-  const commands: Record<string, string> = {
-    anthropic: "claude --version",
-    openai: "codex --version",
-  };
-
-  const cmd = commands[provider];
-  if (!cmd) {
-    return NextResponse.json({ installed: false });
-  }
-
-  try {
-    const { stdout } = await execAsync(cmd);
-    return NextResponse.json({
-      installed: true,
-      version: stdout.trim(),
-    });
-  } catch {
-    return NextResponse.json({ installed: false });
-  }
-}
-
-async function checkAuth(provider: string) {
-  // Check if user has authenticated with the provider
-  // For Claude: check ~/.claude.json or claude auth status
-  // For OpenAI/Codex: check ~/.codex/ or codex auth status
-  
-  try {
-    if (provider === "anthropic") {
-      // Try claude auth status or check for config file
-      try {
-        await execAsync("claude auth status", { timeout: 5000 });
-        return NextResponse.json({ authenticated: true, provider });
-      } catch {
-        // Check if claude config exists
-        const { stdout } = await execAsync("ls ~/.claude.json 2>/dev/null || ls ~/.config/claude/config.json 2>/dev/null", { timeout: 5000 });
-        if (stdout.trim()) {
-          return NextResponse.json({ authenticated: true, provider });
-        }
-      }
-    } else if (provider === "openai") {
-      // Check codex auth
-      try {
-        await execAsync("codex auth status", { timeout: 5000 });
-        return NextResponse.json({ authenticated: true, provider });
-      } catch {
-        // Check for OpenAI config/env
-        const { stdout } = await execAsync("ls ~/.codex/ 2>/dev/null", { timeout: 5000 });
-        if (stdout.trim()) {
-          return NextResponse.json({ authenticated: true, provider });
-        }
-      }
-    }
-    
-    return NextResponse.json({ authenticated: false, provider });
-  } catch {
-    return NextResponse.json({ authenticated: false, provider });
+      error: e.stderr || e.stdout || e.message,
+    }, { status: 500 });
   }
 }

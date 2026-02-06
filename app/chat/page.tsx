@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { Highlight, themes } from "prism-react-renderer";
 import {
   MessageSquare,
   ChevronLeft,
@@ -17,7 +18,19 @@ import {
   Mic,
   MicOff,
   Play,
+  Pencil,
+  Download,
+  RefreshCw,
+  Package,
+  Terminal as TerminalIcon,
+  Paperclip,
+  Eye,
 } from "lucide-react";
+import dynamic from "next/dynamic";
+
+const EmbeddedTerminal = dynamic(() => import("../components/Terminal"), { ssr: false });
+const HtmlPreview = dynamic(() => import("../components/HtmlPreview"), { ssr: false });
+const FileUpload = dynamic(() => import("../components/FileUpload"), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -40,6 +53,80 @@ interface AssistantInfo {
   avatar: string;
 }
 
+// ─── Utility helpers ─────────────────────────────────────────────────────────
+
+function getPrismLanguage(lang: string): string {
+  const map: Record<string, string> = {
+    js: "javascript",
+    node: "javascript",
+    ts: "typescript",
+    py: "python",
+    python3: "python",
+    sh: "bash",
+    shell: "bash",
+    zsh: "bash",
+    rb: "ruby",
+    rs: "rust",
+    kt: "kotlin",
+    kts: "kotlin",
+    golang: "go",
+    "c++": "cpp",
+    pl: "perl",
+  };
+  return map[lang.toLowerCase()] || lang.toLowerCase();
+}
+
+function getDefaultFilename(lang: string): string {
+  const map: Record<string, string> = {
+    python: "script.py",
+    py: "script.py",
+    python3: "script.py",
+    javascript: "script.js",
+    js: "script.js",
+    node: "script.js",
+    typescript: "script.ts",
+    ts: "script.ts",
+    bash: "script.sh",
+    sh: "script.sh",
+    shell: "script.sh",
+    zsh: "script.sh",
+    go: "main.go",
+    golang: "main.go",
+    rust: "main.rs",
+    rs: "main.rs",
+    c: "main.c",
+    cpp: "main.cpp",
+    "c++": "main.cpp",
+    java: "Main.java",
+    kotlin: "script.kts",
+    kt: "script.kts",
+    kts: "script.kts",
+    php: "script.php",
+    ruby: "script.rb",
+    rb: "script.rb",
+    perl: "script.pl",
+    pl: "script.pl",
+    lua: "script.lua",
+    swift: "main.swift",
+    r: "script.R",
+  };
+  return map[lang.toLowerCase()] || `script.${lang}`;
+}
+
+function detectMissingModule(output: string, lang: string): string | null {
+  if (["python", "py", "python3"].includes(lang)) {
+    const match = output.match(
+      /ModuleNotFoundError: No module named '([^']+)'/,
+    );
+    return match ? match[1] : null;
+  }
+  if (["javascript", "js", "node", "typescript", "ts"].includes(lang)) {
+    const match = output.match(/Cannot find module '([^']+)'/);
+    return match ? match[1] : null;
+  }
+  return null;
+}
+
 // ─── Parsing helpers ─────────────────────────────────────────────────────────
 
 function parseMessageContent(content: string): MessageSegment[] {
@@ -51,7 +138,10 @@ function parseMessageContent(content: string): MessageSegment[] {
   while ((match = codeBlockRegex.exec(content)) !== null) {
     // Text before the code block
     if (match.index > lastIndex) {
-      segments.push({ type: "text", content: content.slice(lastIndex, match.index) });
+      segments.push({
+        type: "text",
+        content: content.slice(lastIndex, match.index),
+      });
     }
     // The code block
     segments.push({
@@ -114,7 +204,10 @@ function renderMarkdownText(text: string): string {
   );
 
   // 6. Unordered list items (- item or * item)
-  html = html.replace(/^[\-\*] (.+)$/gm, '<div style="padding-left:16px">• $1</div>');
+  html = html.replace(
+    /^[\-\*] (.+)$/gm,
+    '<div style="padding-left:16px">• $1</div>',
+  );
 
   // 7. Links [text](url)
   html = html.replace(
@@ -130,9 +223,14 @@ function renderMarkdownText(text: string): string {
 
 // ─── CodeBlock component ─────────────────────────────────────────────────────
 
-function CodeBlock({ code, language }: { code: string; language: string }) {
+function CodeBlock({ code, language, onPreviewHtml }: { code: string; language: string; onPreviewHtml?: (html: string) => void }) {
   const [copied, setCopied] = useState(false);
   const [running, setRunning] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editedCode, setEditedCode] = useState(code);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installOutput, setInstallOutput] = useState<string | null>(null);
   const [output, setOutput] = useState<{
     success: boolean;
     output: string;
@@ -140,28 +238,59 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     elapsed: number;
   } | null>(null);
   const [showOutput, setShowOutput] = useState(true);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const displayLang = language || "code";
+  const displayCode = editedCode !== code ? editedCode : code;
+  const hasBeenRun = output !== null;
+
   const canRun = [
-    "python", "py", "python3",
-    "javascript", "js", "node",
-    "typescript", "ts",
-    "bash", "sh", "shell", "zsh",
-    "ruby", "rb",
-    "go", "golang",
-    "rust", "rs",
-    "c", "cpp", "c++",
+    "python",
+    "py",
+    "python3",
+    "javascript",
+    "js",
+    "node",
+    "typescript",
+    "ts",
+    "bash",
+    "sh",
+    "shell",
+    "zsh",
+    "ruby",
+    "rb",
+    "go",
+    "golang",
+    "rust",
+    "rs",
+    "c",
+    "cpp",
+    "c++",
     "swift",
     "java",
-    "kotlin", "kt", "kts",
+    "kotlin",
+    "kt",
+    "kts",
     "php",
-    "perl", "pl",
+    "perl",
+    "pl",
     "lua",
     "r",
   ].includes(displayLang.toLowerCase());
 
+  const canPreview = ["html", "htm", "svg"].includes(displayLang.toLowerCase());
+
+  // Auto-resize textarea when editing
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      const ta = textareaRef.current;
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+    }
+  }, [editing, editedCode]);
+
   async function copyCode() {
-    await navigator.clipboard.writeText(code);
+    await navigator.clipboard.writeText(displayCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -170,19 +299,83 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     setRunning(true);
     setOutput(null);
     setShowOutput(true);
+    setInstallOutput(null);
     try {
       const res = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, language: displayLang }),
+        body: JSON.stringify({ code: displayCode, language: displayLang }),
       });
       const data = await res.json();
       setOutput(data);
     } catch (e: any) {
-      setOutput({ success: false, output: e.message, exitCode: 1, elapsed: 0 });
+      setOutput({
+        success: false,
+        output: e.message,
+        exitCode: 1,
+        elapsed: 0,
+      });
     }
     setRunning(false);
   }
+
+  async function saveToFile() {
+    const defaultName = getDefaultFilename(displayLang);
+    const filename = window.prompt("Save as:", defaultName);
+    if (!filename) return;
+
+    setSaveStatus("saving");
+    try {
+      const res = await fetch("/api/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: displayCode, filename }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus(null), 2000);
+      } else {
+        setSaveStatus("error");
+        setTimeout(() => setSaveStatus(null), 3000);
+      }
+    } catch {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus(null), 3000);
+    }
+  }
+
+  async function installAndRetry(pkg: string) {
+    setInstalling(true);
+    setInstallOutput(null);
+    try {
+      const res = await fetch("/api/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ package: pkg, language: displayLang }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setInstallOutput(`✓ Installed ${pkg}. Re-running...`);
+        setInstalling(false);
+        // Auto re-run after successful install
+        await runCode();
+      } else {
+        setInstallOutput(`✗ Install failed: ${data.error}`);
+        setInstalling(false);
+      }
+    } catch (e: any) {
+      setInstallOutput(`✗ Install error: ${e.message}`);
+      setInstalling(false);
+    }
+  }
+
+  const missingModule =
+    output && !output.success
+      ? detectMissingModule(output.output, displayLang)
+      : null;
+
+  const prismLang = getPrismLanguage(displayLang);
 
   return (
     <div className="my-3 rounded-lg overflow-hidden border border-white/10">
@@ -195,14 +388,63 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
               onClick={runCode}
               disabled={running}
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-white/10 text-green-400 hover:text-green-300 disabled:opacity-50 transition-colors"
-              title="Run code"
+              title={hasBeenRun ? "Re-run code" : "Run code"}
             >
               {running ? (
                 <Loader2 className="w-3 h-3 animate-spin" />
+              ) : hasBeenRun ? (
+                <RefreshCw className="w-3 h-3" />
               ) : (
                 <Play className="w-3 h-3" />
               )}
-              <span>{running ? "Running..." : "Run"}</span>
+              <span>
+                {running ? "Running..." : hasBeenRun ? "Re-run" : "Run"}
+              </span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (editing) {
+                setEditing(false);
+              } else {
+                setEditedCode(displayCode);
+                setEditing(true);
+              }
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+            title={editing ? "Done editing" : "Edit code"}
+          >
+            {editing ? (
+              <Check className="w-3 h-3 text-green-400" />
+            ) : (
+              <Pencil className="w-3 h-3" />
+            )}
+            <span>{editing ? "Done" : "Edit"}</span>
+          </button>
+          <button
+            onClick={saveToFile}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+            title="Save to file"
+          >
+            <Download className="w-3 h-3" />
+            <span>
+              {saveStatus === "saving"
+                ? "Saving..."
+                : saveStatus === "saved"
+                  ? "Saved!"
+                  : saveStatus === "error"
+                    ? "Error!"
+                    : "Save"}
+            </span>
+          </button>
+          {canPreview && (
+            <button
+              onClick={() => onPreviewHtml?.(displayCode)}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-white/10 text-purple-400 hover:text-purple-300 transition-colors"
+              title="Preview HTML"
+            >
+              <Eye className="w-3 h-3" />
+              <span>Preview</span>
             </button>
           )}
           <button
@@ -221,9 +463,37 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
       </div>
 
       {/* Code content */}
-      <pre className="p-3 overflow-x-auto text-sm leading-relaxed bg-[#1e1e2e]">
-        <code>{code}</code>
-      </pre>
+      {editing ? (
+        <textarea
+          ref={textareaRef}
+          value={editedCode}
+          onChange={(e) => setEditedCode(e.target.value)}
+          className="w-full p-3 text-sm leading-relaxed bg-[#1e1e2e] text-gray-100 font-mono resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 border-0"
+          style={{ minHeight: "80px" }}
+          spellCheck={false}
+        />
+      ) : (
+        <Highlight
+          theme={themes.nightOwl}
+          code={displayCode}
+          language={prismLang}
+        >
+          {({ style, tokens, getLineProps, getTokenProps }) => (
+            <pre
+              className="p-3 overflow-x-auto text-sm leading-relaxed !bg-[#1e1e2e] m-0"
+              style={{ ...style, background: "#1e1e2e" }}
+            >
+              {tokens.map((line, i) => (
+                <div key={i} {...getLineProps({ line })}>
+                  {line.map((token, key) => (
+                    <span key={key} {...getTokenProps({ token })} />
+                  ))}
+                </div>
+              ))}
+            </pre>
+          )}
+        </Highlight>
+      )}
 
       {/* Output panel */}
       {output && (
@@ -235,15 +505,51 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
             <ChevronRight
               className={`w-3 h-3 transition-transform ${showOutput ? "rotate-90" : ""}`}
             />
-            <span className={output.success ? "text-green-400" : "text-red-400"}>
+            <span
+              className={output.success ? "text-green-400" : "text-red-400"}
+            >
               {output.success ? "✓" : "✗"} Exit {output.exitCode}
             </span>
             <span className="text-gray-500 ml-auto">{output.elapsed}ms</span>
           </button>
           {showOutput && (
-            <pre className="p-3 overflow-x-auto text-xs leading-relaxed bg-black/40 text-gray-300 max-h-64 overflow-y-auto">
-              {output.output || "(no output)"}
-            </pre>
+            <div>
+              <pre className="p-3 overflow-x-auto text-xs leading-relaxed bg-black/40 text-gray-300 max-h-64 overflow-y-auto">
+                {output.output || "(no output)"}
+              </pre>
+
+              {/* Auto-install missing dependency */}
+              {missingModule && (
+                <div className="px-3 py-2 bg-yellow-500/10 border-t border-white/10 flex items-center gap-2">
+                  <Package className="w-4 h-4 text-yellow-400 shrink-0" />
+                  <span className="text-xs text-yellow-300">
+                    Missing module:{" "}
+                    <strong className="text-yellow-200">{missingModule}</strong>
+                  </span>
+                  <button
+                    onClick={() => installAndRetry(missingModule)}
+                    disabled={installing}
+                    className="ml-auto flex items-center gap-1 px-2 py-1 text-xs rounded bg-yellow-600/30 hover:bg-yellow-600/50 text-yellow-200 disabled:opacity-50 transition-colors"
+                  >
+                    {installing ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Package className="w-3 h-3" />
+                    )}
+                    <span>
+                      {installing ? "Installing..." : "Install & Retry"}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Install output */}
+              {installOutput && (
+                <pre className="px-3 py-2 text-xs bg-black/30 text-gray-400 border-t border-white/10">
+                  {installOutput}
+                </pre>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -264,6 +570,9 @@ export default function ChatPage() {
   });
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [htmlPreview, setHtmlPreview] = useState<string | null>(null);
+  const [attachedFile, setAttachedFile] = useState<{ filename: string; textContent?: string | null } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -624,6 +933,7 @@ export default function ChatPage() {
                               key={i}
                               code={segment.content}
                               language={segment.language || "code"}
+                              onPreviewHtml={setHtmlPreview}
                             />
                           ) : (
                             <div
@@ -694,55 +1004,92 @@ export default function ChatPage() {
         </div>
       </div>
 
+      {/* HTML Preview Panel */}
+      {htmlPreview && (
+        <HtmlPreview html={htmlPreview} onClose={() => setHtmlPreview(null)} />
+      )}
+
+      {/* Terminal Panel */}
+      {showTerminal && (
+        <EmbeddedTerminal onClose={() => setShowTerminal(false)} />
+      )}
+
       {/* Input */}
       <div className="border-t border-white/10 bg-black/20 backdrop-blur-sm shrink-0">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex gap-2 sm:gap-3">
-            {speechSupported && (
+          {/* Attached file indicator */}
+          {attachedFile && (
+            <div className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm">
+              <Paperclip className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-blue-300 truncate">{attachedFile.filename}</span>
+              <button onClick={() => setAttachedFile(null)} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+            </div>
+          )}
+          <FileUpload onFileUploaded={(file) => {
+            setAttachedFile(file);
+            // Prepend file context to next message
+            if (file.textContent) {
+              setInput(prev => prev || `[Attached: ${file.filename}]\n`);
+            }
+          }}>
+            <div className="flex gap-2 sm:gap-3">
+              {speechSupported && (
+                <button
+                  onClick={toggleListening}
+                  className={`px-3 py-3 rounded-xl transition-colors ${
+                    isListening
+                      ? "bg-red-600 text-white animate-pulse"
+                      : "bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10"
+                  }`}
+                  title={isListening ? "Stop listening" : "Voice input"}
+                >
+                  {isListening ? (
+                    <MicOff className="w-5 h-5" />
+                  ) : (
+                    <Mic className="w-5 h-5" />
+                  )}
+                </button>
+              )}
               <button
-                onClick={toggleListening}
+                onClick={() => setShowTerminal(!showTerminal)}
                 className={`px-3 py-3 rounded-xl transition-colors ${
-                  isListening
-                    ? "bg-red-600 text-white animate-pulse"
+                  showTerminal
+                    ? "bg-green-600/20 border border-green-500/30 text-green-400"
                     : "bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10"
                 }`}
-                title={isListening ? "Stop listening" : "Voice input"}
+                title={showTerminal ? "Hide terminal" : "Open terminal"}
               >
-                {isListening ? (
-                  <MicOff className="w-5 h-5" />
+                <TerminalIcon className="w-5 h-5" />
+              </button>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  isListening ? "Listening..." : "Type a message..."
+                }
+                rows={1}
+                className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl resize-none focus:outline-none focus:border-blue-500/50 placeholder-gray-500"
+                style={{ minHeight: "48px", maxHeight: "120px" }}
+                disabled={loading}
+              />
+              <button
+                onClick={sendMessage}
+                disabled={!input.trim() || loading}
+                className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
-                  <Mic className="w-5 h-5" />
+                  <Send className="w-5 h-5" />
                 )}
               </button>
-            )}
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                isListening ? "Listening..." : "Type a message..."
-              }
-              rows={1}
-              className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl resize-none focus:outline-none focus:border-blue-500/50 placeholder-gray-500"
-              style={{ minHeight: "48px", maxHeight: "120px" }}
-              disabled={loading}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={!input.trim() || loading}
-              className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
-            </button>
-          </div>
+            </div>
+          </FileUpload>
           <p className="text-xs text-gray-500 mt-2 text-center">
             {speechSupported ? "Tap mic to speak • " : ""}Enter to send,
-            Shift+Enter for new line
+            Shift+Enter for new line • Drop files to attach
           </p>
         </div>
       </div>
