@@ -1,21 +1,19 @@
 {
-  "name": "OpenClaw UI",
-  "short_name": "OpenClaw",
-  "description": "Control your AI assistant",
-  "start_url": "/",
+  "name": "Bob's Chat",
+  "short_name": "Bob",
+  "description": "Chat with Bob - AI coding assistant",
+  "start_url": "/chat",
   "display": "standalone",
   "background_color": "#111827",
   "theme_color": "#3b82f6",
+  "orientation": "any",
+  "categories": ["developer", "productivity"],
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/icon-192.svg",
       "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }
