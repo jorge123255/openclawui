@@ -39,6 +39,12 @@ const IGNORE_DIRS = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
   ".cache", "coverage", ".turbo", ".vercel", ".output", "vendor",
   ".svelte-kit", ".nuxt", "target", "out",
+  // System/Docker directories — skip when analyzing projects
+  "usr", "var", "etc", "bin", "sbin", "lib", "lib64", "opt", "proc", "sys",
+  "dev", "run", "tmp", "boot", "media", "mnt", "srv", "root",
+  // Other common non-source dirs
+  "venv", ".venv", "env", ".env.d", "__MACOSX", ".Spotlight-V100",
+  ".fseventsd", ".Trashes", "logs",
 ]);
 
 const CODE_EXTENSIONS = new Set([
@@ -48,13 +54,19 @@ const CODE_EXTENSIONS = new Set([
   ".sql", ".graphql", ".prisma", ".env", ".sh",
 ]);
 
+const MAX_FILES = 500;
+const MAX_SIZE = 10 * 1024 * 1024; // 10MB cap
+let _scanFileCount = 0;
+let _scanTotalSize = 0;
+
 function scanDirectory(dir: string, basePath: string = "", depth: number = 0, maxDepth: number = 5): FileNode[] {
-  if (depth > maxDepth) return [];
+  if (depth > maxDepth || _scanFileCount > MAX_FILES) return [];
   const results: FileNode[] = [];
   
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
+      if (_scanFileCount > MAX_FILES) break;
       if (entry.name.startsWith(".") && entry.name !== ".env" && entry.name !== ".env.local") continue;
       if (IGNORE_DIRS.has(entry.name)) continue;
       
@@ -69,8 +81,14 @@ function scanDirectory(dir: string, basePath: string = "", depth: number = 0, ma
       } else {
         const ext = extname(entry.name).toLowerCase();
         if (CODE_EXTENSIONS.has(ext) || entry.name.startsWith(".env")) {
-          const stat = statSync(fullPath);
-          results.push({ name: entry.name, path: relPath, type: "file", ext, size: stat.size });
+          try {
+            const stat = statSync(fullPath);
+            // Skip individual files over 1MB (likely generated/minified)
+            if (stat.size > 1024 * 1024) continue;
+            _scanFileCount++;
+            _scanTotalSize += stat.size;
+            results.push({ name: entry.name, path: relPath, type: "file", ext, size: stat.size });
+          } catch {}
         }
       }
     }
@@ -166,6 +184,8 @@ export async function POST(request: Request) {
     }
     
     const { framework, language, devCommand, buildCommand } = detectFramework(projectPath, pkg);
+    _scanFileCount = 0;
+    _scanTotalSize = 0;
     const structure = scanDirectory(projectPath);
     const { count: totalFiles, size: totalSize } = countFiles(structure);
     
