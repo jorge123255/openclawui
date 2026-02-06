@@ -40,6 +40,7 @@ const AgentMode = dynamic(() => import("../components/AgentMode"), { ssr: false 
 const NotebookMode = dynamic(() => import("../components/NotebookMode"), { ssr: false });
 const DesignMode = dynamic(() => import("../components/DesignMode"), { ssr: false });
 const ProjectPanel = dynamic(() => import("../components/ProjectPanel"), { ssr: false });
+const DiffViewer = dynamic(() => import("@/app/components/DiffViewer"), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -597,6 +598,11 @@ export default function ChatPage() {
   const [projectContext, setProjectContext] = useState<string>("");
   const [projectAnalysis, setProjectAnalysis] = useState<any>(null);
 
+  // Diff viewer & checkpoints state
+  const [diffView, setDiffView] = useState<null | { filePath: string; isNew: boolean; diff: string; oldContent: string; newContent: string; stats: { additions: number; deletions: number } }>(null);
+  const [checkpoints, setCheckpoints] = useState<any[]>([]);
+  const [showCheckpoints, setShowCheckpoints] = useState(false);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -606,6 +612,16 @@ export default function ChatPage() {
 
   // Theme state
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  // Always-allow commands state
+  const [allowedCommands, setAllowedCommands] = useState<{exact: string[], prefixes: string[]}>(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('allowed-commands') || '{"exact":[],"prefixes":[]}'); } catch { return {exact:[], prefixes:[]}; }
+    }
+    return {exact:[], prefixes:[]};
+  });
+  const autoRanCommandsRef = useRef<Set<string>>(new Set());
+  const [showAllowedManager, setShowAllowedManager] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1008,6 +1024,102 @@ export default function ChatPage() {
     setCommandResults(prev => ({ ...prev, [commandId]: { output: '', code: 0, status: 'denied' } }));
   }
 
+  // Always-allow helpers
+  function isCommandAllowed(cmd: string): boolean {
+    const trimmed = cmd.trim();
+    if (allowedCommands.exact.includes(trimmed)) return true;
+    const base = trimmed.split(/\s+/)[0];
+    return allowedCommands.prefixes.includes(base);
+  }
+
+  function alwaysAllowCommand(commandId: string, command: string) {
+    runApprovedCommand(commandId, command);
+    const trimmed = command.trim();
+    const updated = { ...allowedCommands, exact: Array.from(new Set([...allowedCommands.exact, trimmed])) };
+    setAllowedCommands(updated);
+    localStorage.setItem('allowed-commands', JSON.stringify(updated));
+  }
+
+  function alwaysAllowPrefix(commandId: string, command: string) {
+    const base = command.trim().split(/\s+/)[0];
+    runApprovedCommand(commandId, command);
+    const updated = { ...allowedCommands, prefixes: Array.from(new Set([...allowedCommands.prefixes, base])) };
+    setAllowedCommands(updated);
+    localStorage.setItem('allowed-commands', JSON.stringify(updated));
+  }
+
+  function removeAllowedExact(cmd: string) {
+    const updated = { ...allowedCommands, exact: allowedCommands.exact.filter(c => c !== cmd) };
+    setAllowedCommands(updated);
+    localStorage.setItem('allowed-commands', JSON.stringify(updated));
+  }
+
+  function removeAllowedPrefix(prefix: string) {
+    const updated = { ...allowedCommands, prefixes: allowedCommands.prefixes.filter(p => p !== prefix) };
+    setAllowedCommands(updated);
+    localStorage.setItem('allowed-commands', JSON.stringify(updated));
+  }
+
+  function clearAllAllowed() {
+    const updated = { exact: [], prefixes: [] };
+    setAllowedCommands(updated);
+    localStorage.setItem('allowed-commands', JSON.stringify(updated));
+  }
+
+  // ── Diff viewer & checkpoint helpers ────────────────────────────────────────
+
+  const projectPath = projectAnalysis?.path || null;
+
+  async function showDiff(filePath: string, newContent: string) {
+    const res = await fetch("/api/project/diff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath, newContent }),
+    });
+    const data = await res.json();
+    if (data.error) return;
+    setDiffView(data);
+  }
+
+  async function applyDiff() {
+    if (!diffView) return;
+    await fetch("/api/project/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: diffView.filePath, content: diffView.newContent }),
+    });
+    setDiffView(null);
+  }
+
+  async function createCheckpoint(name?: string) {
+    if (!projectPath) return;
+    const res = await fetch("/api/project/checkpoint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, action: "create", name }),
+    });
+    const data = await res.json();
+    if (data.ok) loadCheckpoints();
+  }
+
+  async function loadCheckpoints() {
+    if (!projectPath) return;
+    const res = await fetch(`/api/project/checkpoint?path=${encodeURIComponent(projectPath)}`);
+    const data = await res.json();
+    if (data.checkpoints) setCheckpoints(data.checkpoints);
+  }
+
+  async function revertToCheckpoint(checkpointId: string) {
+    if (!confirm(`Revert to ${checkpointId}? Current changes will be stashed.`)) return;
+    const res = await fetch("/api/project/checkpoint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, action: "revert", checkpointId }),
+    });
+    const data = await res.json();
+    if (data.ok) loadCheckpoints();
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1285,12 +1397,22 @@ export default function ChatPage() {
                           const cmdResult = commandResults[commandId];
 
                           if (isShellCommand) {
+                            // Auto-run allowed commands
+                            const isAllowed = isCommandAllowed(segment.content);
+                            if (isAllowed && !cmdResult && !autoRanCommandsRef.current.has(commandId)) {
+                              autoRanCommandsRef.current.add(commandId);
+                              setTimeout(() => runApprovedCommand(commandId, segment.content), 0);
+                            }
+                            const baseCmd = segment.content.trim().split(/\s+/)[0];
+
                             return (
                               <div key={segIdx} className={`my-2 rounded-lg border ${
                                 cmdResult?.status === 'denied'
                                   ? 'border-red-500/20 bg-red-500/5'
                                   : cmdResult?.status === 'done'
                                   ? 'border-green-500/20 bg-green-500/5'
+                                  : isAllowed
+                                  ? 'border-blue-500/20 bg-blue-500/5'
                                   : 'border-yellow-500/30 bg-yellow-500/5'
                               } overflow-hidden`}>
                                 {/* Command header */}
@@ -1300,8 +1422,11 @@ export default function ChatPage() {
                                       <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
                                     </svg>
                                     <span className="text-xs font-medium text-gray-400">Terminal Command</span>
+                                    {isAllowed && (
+                                      <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded-full">⚡ Auto-approved</span>
+                                    )}
                                   </div>
-                                  {!cmdResult && (
+                                  {!cmdResult && !isAllowed && (
                                     <div className="flex items-center gap-1.5">
                                       <button
                                         onClick={() => runApprovedCommand(commandId, segment.content)}
@@ -1311,11 +1436,27 @@ export default function ChatPage() {
                                         Run
                                       </button>
                                       <button
+                                        onClick={() => alwaysAllowCommand(commandId, segment.content)}
+                                        className="flex items-center gap-1 px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-xs rounded-md transition-colors"
+                                        title="Run and always allow this exact command"
+                                      >
+                                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+                                        Always Allow
+                                      </button>
+                                      <button
                                         onClick={() => denyCommand(commandId)}
                                         className="flex items-center gap-1 px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 text-xs rounded-md transition-colors"
                                       >
                                         <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                                         Deny
+                                      </button>
+                                      <span className="text-gray-600 mx-0.5">·</span>
+                                      <button
+                                        onClick={() => alwaysAllowPrefix(commandId, segment.content)}
+                                        className="text-[10px] text-gray-500 hover:text-blue-400 transition-colors"
+                                        title={`Allow all ${baseCmd} commands`}
+                                      >
+                                        Allow all <code className="bg-white/5 px-1 rounded">{baseCmd}</code>
                                       </button>
                                     </div>
                                   )}
@@ -1452,9 +1593,120 @@ export default function ChatPage() {
         <HtmlPreview html={htmlPreview} onClose={() => setHtmlPreview(null)} />
       )}
 
+      {/* Allowed Commands Manager */}
+      {showAllowedManager && (
+        <div className={`border-t ${isDark ? 'border-white/10 bg-gray-900/95' : 'border-gray-200 bg-white/95'} backdrop-blur-sm`}>
+          <div className="max-w-4xl mx-auto px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <span className={`text-sm font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>Allowed Commands</span>
+                <span className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  ({allowedCommands.exact.length} exact, {allowedCommands.prefixes.length} prefixes)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {(allowedCommands.exact.length > 0 || allowedCommands.prefixes.length > 0) && (
+                  <button
+                    onClick={clearAllAllowed}
+                    className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAllowedManager(false)}
+                  className={`p-1 rounded ${isDark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-500'}`}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            {allowedCommands.exact.length === 0 && allowedCommands.prefixes.length === 0 ? (
+              <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-400'} py-1`}>
+                No commands allowed yet. Click &quot;Always Allow&quot; on a command approval card to add one.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                {allowedCommands.prefixes.map(prefix => (
+                  <span key={`p-${prefix}`} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs ${
+                    isDark ? 'bg-purple-500/15 text-purple-300 border border-purple-500/20' : 'bg-purple-50 text-purple-700 border border-purple-200'
+                  }`}>
+                    <span className="font-mono">{prefix} *</span>
+                    <button onClick={() => removeAllowedPrefix(prefix)} className="hover:text-red-400 transition-colors ml-0.5">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {allowedCommands.exact.map(cmd => (
+                  <span key={`e-${cmd}`} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs ${
+                    isDark ? 'bg-blue-500/15 text-blue-300 border border-blue-500/20' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                  }`}>
+                    <span className="font-mono truncate max-w-[200px]">{cmd}</span>
+                    <button onClick={() => removeAllowedExact(cmd)} className="hover:text-red-400 transition-colors ml-0.5">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Terminal Panel */}
       {showTerminal && (
         <EmbeddedTerminal onClose={() => setShowTerminal(false)} />
+      )}
+
+      {/* Checkpoint Panel */}
+      {showCheckpoints && projectPath && (
+        <div className="relative">
+          <div className="absolute bottom-2 left-4 right-4 max-w-md bg-gray-900 border border-white/10 rounded-xl shadow-2xl z-40 overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+              <span className="text-sm font-medium text-white">Checkpoints</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    const name = prompt("Checkpoint name (optional):");
+                    createCheckpoint(name || undefined);
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                  Create
+                </button>
+                <button onClick={() => setShowCheckpoints(false)} className="p-1 hover:bg-white/10 rounded">
+                  <svg className="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {checkpoints.length === 0 ? (
+                <div className="px-3 py-4 text-center text-xs text-gray-500">No checkpoints yet. Create one before making changes.</div>
+              ) : (
+                checkpoints.map(cp => (
+                  <div key={cp.id} className="flex items-center justify-between px-3 py-2 hover:bg-white/5 border-b border-white/5 last:border-0">
+                    <div>
+                      <div className="text-xs text-white">{cp.name}</div>
+                      <div className="text-[10px] text-gray-500">{new Date(cp.date).toLocaleString()}</div>
+                    </div>
+                    <button
+                      onClick={() => revertToCheckpoint(cp.id)}
+                      className="text-[10px] px-2 py-0.5 text-orange-400 hover:bg-orange-500/10 rounded transition-colors"
+                    >
+                      Revert
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Input */}
@@ -1492,6 +1744,19 @@ export default function ChatPage() {
                 <TerminalIcon className="w-5 h-5" />
               </button>
               <button
+                onClick={() => setShowAllowedManager(!showAllowedManager)}
+                className={`px-3 py-3 rounded-xl transition-colors border ${
+                  showAllowedManager
+                    ? (isDark ? "bg-blue-600/20 border-blue-500/30 text-blue-400" : "bg-blue-100 border-blue-400 text-blue-700")
+                    : (isDark ? "bg-white/5 border-white/10 text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30" : "bg-gray-100 border-gray-300 text-gray-500 hover:text-blue-600 hover:bg-blue-50")
+                }`}
+                title="Manage allowed commands"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+              </button>
+              <button
                 onClick={() => setShowNotebook(true)}
                 className="px-3 py-3 rounded-xl transition-colors border bg-white/5 border-white/10 text-gray-400 hover:text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/30"
                 title="Notebook mode"
@@ -1527,6 +1792,26 @@ export default function ChatPage() {
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
               </button>
+              {projectPath && (
+                <button
+                  onClick={() => { setShowCheckpoints(!showCheckpoints); if (!showCheckpoints) loadCheckpoints(); }}
+                  className={`px-3 py-3 rounded-xl transition-colors border relative ${
+                    showCheckpoints
+                      ? "bg-blue-600/20 border-blue-500/30 text-blue-400"
+                      : "bg-white/5 border-white/10 text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30"
+                  }`}
+                  title="Checkpoints"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  {checkpoints.length > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-blue-500 rounded-full text-[8px] text-white flex items-center justify-center">
+                      {checkpoints.length}
+                    </span>
+                  )}
+                </button>
+              )}
               <textarea
                 ref={inputRef}
                 value={input}
@@ -1553,6 +1838,16 @@ export default function ChatPage() {
           </p>
         </div>
       </div>
+
+      {/* Diff Viewer Modal */}
+      {diffView && (
+        <DiffViewer
+          {...diffView}
+          onApprove={applyDiff}
+          onReject={() => setDiffView(null)}
+          onClose={() => setDiffView(null)}
+        />
+      )}
     </div>
   );
 }
