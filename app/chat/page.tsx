@@ -39,6 +39,7 @@ const FileUpload = dynamic(() => import("../components/FileUpload"), { ssr: fals
 const AgentMode = dynamic(() => import("../components/AgentMode"), { ssr: false });
 const NotebookMode = dynamic(() => import("../components/NotebookMode"), { ssr: false });
 const DesignMode = dynamic(() => import("../components/DesignMode"), { ssr: false });
+const ProjectPanel = dynamic(() => import("../components/ProjectPanel"), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -591,6 +592,11 @@ export default function ChatPage() {
   const [showDesignMode, setShowDesignMode] = useState(false);
   const [agentTask, setAgentTask] = useState<string | null>(null);
 
+  // Project panel state
+  const [showProject, setShowProject] = useState(false);
+  const [projectContext, setProjectContext] = useState<string>("");
+  const [projectAnalysis, setProjectAnalysis] = useState<any>(null);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -842,6 +848,7 @@ export default function ChatPage() {
           messages: updatedMessages.map((m) => ({ role: m.role, content: m.content })),
           sessionKey: "webchat-ui",
           stream: true,
+          projectContext: projectContext || undefined,
         }),
       });
 
@@ -1180,6 +1187,32 @@ export default function ChatPage() {
       </div>
 
       {/* Messages */}
+      <div className="flex flex-1 overflow-hidden">
+        {showProject && (
+          <ProjectPanel
+            onClose={() => setShowProject(false)}
+            onFileOpen={(path, content) => {
+              const fileName = path.split("/").pop();
+              setInput(`Here's the file ${fileName}:\n\`\`\`\n${content.slice(0, 3000)}\n\`\`\``);
+            }}
+            onProjectLoaded={(analysis) => {
+              setProjectAnalysis(analysis);
+              setProjectContext(analysis.summary);
+              updateMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: "assistant" as const,
+                content: `📂 **Project loaded: ${analysis.name}**\n\n` +
+                  `${analysis.framework ? `**Framework:** ${analysis.framework}\n` : ""}` +
+                  `**Language:** ${analysis.language}\n` +
+                  `**Files:** ${analysis.totalFiles} (${(analysis.totalSize / 1024).toFixed(0)}KB)\n` +
+                  `${analysis.routes.length ? `**Routes:** ${analysis.routes.length}\n` : ""}` +
+                  `${analysis.components.length ? `**Components:** ${analysis.components.length}\n` : ""}` +
+                  `\nI've analyzed the codebase. Ask me anything about it or tell me what to change!`,
+                timestamp: new Date(),
+              }]);
+            }}
+          />
+        )}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
           {displayMessages.length === 0 && !searchQuery ? (
@@ -1307,6 +1340,7 @@ export default function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
       </div>
+      </div>
 
       {/* HTML Preview Panel */}
       {htmlPreview && (
@@ -1373,6 +1407,19 @@ export default function ChatPage() {
                   <path d="M8 21h8" />
                   <path d="M12 17v4" />
                   <circle cx="12" cy="10" r="2" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setShowProject(!showProject)}
+                className={`px-3 py-3 rounded-xl transition-colors border ${
+                  showProject
+                    ? "bg-blue-600/20 border-blue-500/30 text-blue-400"
+                    : "bg-white/5 border-white/10 text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30"
+                }`}
+                title="Open project"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
               </button>
               <textarea

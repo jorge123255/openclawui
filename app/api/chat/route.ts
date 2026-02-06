@@ -30,7 +30,7 @@ async function loadFileQuietly(path: string): Promise<string> {
   }
 }
 
-async function buildSystemPrompt(config: any): Promise<string> {
+async function buildSystemPrompt(config: any, projectContext?: string): Promise<string> {
   const workspace = config.workspace?.path || join(homedir(), "clawd");
   
   const soul = await loadFileQuietly(join(workspace, "SOUL.md"));
@@ -59,6 +59,14 @@ async function buildSystemPrompt(config: any): Promise<string> {
     parts.push("");
   }
   
+  if (projectContext) {
+    parts.push("");
+    parts.push("## Current Project Context");
+    parts.push(projectContext);
+    parts.push("");
+    parts.push("You can help with this project. When suggesting file changes, specify the file path.");
+  }
+  
   parts.push(`Current time: ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} (CST)`);
   
   return parts.join("\n");
@@ -67,7 +75,7 @@ async function buildSystemPrompt(config: any): Promise<string> {
 const MAX_HISTORY_MESSAGES = 40; // Cap conversation history to prevent context overflow
 
 export async function POST(request: Request) {
-  const { message, messages: history, sessionKey, stream: wantStream } = await request.json();
+  const { message, messages: history, sessionKey, stream: wantStream, projectContext } = await request.json();
 
   if (!message && (!history || history.length === 0)) {
     return NextResponse.json({ error: "Message required" }, { status: 400 });
@@ -77,7 +85,7 @@ export async function POST(request: Request) {
   const gatewayPort = config.gateway?.port || 18789;
   const gatewayToken = config.gateway?.auth?.token;
 
-  const systemPrompt = await buildSystemPrompt(config);
+  const systemPrompt = await buildSystemPrompt(config, projectContext);
   
   // Build messages array: system prompt + capped history
   const apiMessages: Array<{role: string; content: string}> = [];
