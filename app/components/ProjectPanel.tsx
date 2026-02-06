@@ -136,15 +136,20 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
 
   async function browseDirectory(dir: string) {
     setBrowseLoading(true);
+    setError("");
     try {
       const url = dir ? `/api/project/browse?dir=${encodeURIComponent(dir)}` : "/api/project/browse";
       const res = await fetch(url);
       const data = await res.json();
-      if (data.folders) {
+      if (data.error) {
+        setError(`Can't open: ${data.error.includes("timed out") ? "folder not accessible (timed out)" : data.error}`);
+      } else if (data.folders) {
         setBrowsePath(data.current);
         setBrowseFolders(data.folders);
       }
-    } catch {}
+    } catch (e: any) {
+      setError("Failed to browse directory");
+    }
     setBrowseLoading(false);
   }
 
