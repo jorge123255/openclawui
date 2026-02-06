@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const lang = (language || "").toLowerCase();
 
     if (["python", "py", "python3"].includes(lang)) {
-      command = `pip3 install "${pkg}"`;
+      command = `pip3 install --user --break-system-packages "${pkg}"`;
     } else if (["javascript", "js", "node", "typescript", "ts"].includes(lang)) {
       command = `npm install -g "${pkg}"`;
     } else if (["ruby", "rb"].includes(lang)) {

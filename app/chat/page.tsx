@@ -1030,7 +1030,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className={`h-screen flex flex-col ${cls.page}`}>
+    <div className={`h-screen md:h-screen flex flex-col ${cls.page}`} style={{ height: '100dvh' }}>
       {/* Header */}
       <header className={`border-b ${cls.header} backdrop-blur-sm shrink-0`}>
         <div className="max-w-4xl mx-auto px-4 py-3">
