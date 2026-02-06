@@ -246,12 +246,20 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
             </div>
           ) : (
             <>
-              {/* Current path breadcrumb */}
-              <div className="px-3 py-2 border-b border-white/5">
+              {/* Current path + Analyze button */}
+              <div className="px-3 py-2 border-b border-white/5 space-y-1.5">
                 <div className="flex items-center gap-1 text-xs text-gray-500 truncate">
                   <FolderOpen className="w-3 h-3 shrink-0" />
                   <span className="truncate">{browsePath}</span>
                 </div>
+                <button
+                  onClick={() => selectFolder(browsePath)}
+                  disabled={loading || !browsePath}
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                  {loading ? "Analyzing..." : "Open this folder as project"}
+                </button>
               </div>
 
               {/* Folder list */}
@@ -278,22 +286,15 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
                   <div className="px-3 py-4 text-xs text-gray-500 text-center">No subdirectories</div>
                 ) : (
                   browseFolders.map(f => (
-                    <div key={f.path} className="flex items-center group">
-                      <button
-                        onClick={() => browseDirectory(f.path)}
-                        className="flex-1 text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:bg-white/5 truncate"
-                      >
-                        <FolderOpen className="w-3.5 h-3.5 shrink-0 text-gray-500" />
-                        <span className="truncate">{f.name}</span>
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); selectFolder(f.path); }}
-                        className="px-2 py-1 mr-2 text-xs text-blue-400 bg-blue-500/10 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                        title="Open as project"
-                      >
-                        Open
-                      </button>
-                    </div>
+                    <button
+                      key={f.path}
+                      onClick={() => browseDirectory(f.path)}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:bg-white/5"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 shrink-0 text-blue-400/60" />
+                      <span className="truncate">{f.name}</span>
+                      <ChevronRight className="w-3 h-3 shrink-0 text-gray-600 ml-auto" />
+                    </button>
                   ))
                 )}
               </div>
