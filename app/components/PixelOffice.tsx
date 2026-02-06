@@ -880,9 +880,11 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
       if (!container) return;
       const w = container.clientWidth;
       const dpr = window.devicePixelRatio || 1;
+      // Cap height so it doesn't eat the whole screen
+      const maxH = Math.min(window.innerHeight * 0.35, 320);
       const pixW = w * dpr;
-      const ps = pixW / 160; // pixel size
-      const pixH = ps * 72;  // scene is 72 pixels tall
+      const ps = Math.min(pixW / 160, maxH * dpr / 72);
+      const pixH = ps * 72;
       canvas.width = pixW;
       canvas.height = pixH;
       canvas.style.width = `${w}px`;

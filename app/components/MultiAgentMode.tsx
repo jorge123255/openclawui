@@ -260,8 +260,8 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
         </div>
       </div>
 
-      {/* Pixel Art Office */}
-      <div className={`px-4 py-3 border-b ${border} relative`}>
+      {/* Pixel Art Office — stays visible at top */}
+      <div className={`px-4 py-3 border-b ${border} relative sticky top-0 z-20`} style={{ flexShrink: 0 }}>
         <PixelOffice
           activity={{
             boss: agents.boss.status === "thinking" ? (currentRound === 0 ? "planning" : "diagnosing")
