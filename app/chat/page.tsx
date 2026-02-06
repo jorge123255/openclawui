@@ -1434,12 +1434,12 @@ export default function ChatPage() {
                                   : 'border-yellow-500/30 bg-yellow-500/5'
                               } overflow-hidden`}>
                                 {/* Command header */}
-                                <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                                <div className={`flex items-center justify-between px-3 py-2 border-b ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
                                   <div className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                       <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
                                     </svg>
-                                    <span className="text-xs font-medium text-gray-400">Terminal Command</span>
+                                    <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Terminal Command</span>
                                     {isAllowed && (
                                       <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded-full">⚡ Auto-approved</span>
                                     )}
@@ -1496,7 +1496,7 @@ export default function ChatPage() {
 
                                 {/* Command content */}
                                 <pre className={`px-3 py-2 text-sm font-mono overflow-x-auto ${
-                                  cmdResult?.status === 'denied' ? 'opacity-50 line-through' : 'text-gray-200'
+                                  cmdResult?.status === 'denied' ? 'opacity-50 line-through' : isDark ? 'text-gray-200' : 'text-gray-800'
                                 }`}>
                                   <code>{segment.content}</code>
                                 </pre>
@@ -1505,7 +1505,7 @@ export default function ChatPage() {
                                 {cmdResult?.status === 'done' && cmdResult.output && (
                                   <div className="border-t border-white/10">
                                     <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wide">Output</div>
-                                    <pre className="px-3 py-2 text-xs font-mono text-gray-400 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
+                                    <pre className={`px-3 py-2 text-xs font-mono overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                                       {cmdResult.output}
                                     </pre>
                                   </div>
@@ -1534,12 +1534,12 @@ export default function ChatPage() {
                                     ? 'border-green-500/20 bg-green-500/5'
                                     : 'border-purple-500/30 bg-purple-500/5'
                                 } overflow-hidden`}>
-                                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                                  <div className={`flex items-center justify-between px-3 py-2 border-b ${isDark ? 'border-white/10' : 'border-gray-200'}`}>
                                     <div className="flex items-center gap-2">
                                       <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                         <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                                       </svg>
-                                      <span className="text-xs font-medium text-gray-400">File Edit</span>
+                                      <span className={`text-xs font-medium ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>File Edit</span>
                                       <code className="text-[10px] bg-white/5 px-1.5 py-0.5 rounded text-purple-300">{editFilePath.split("/").pop()}</code>
                                     </div>
                                     {!editResult && (
@@ -1591,9 +1591,9 @@ export default function ChatPage() {
                                       <span className="text-xs text-red-400">✗ Rejected</span>
                                     )}
                                   </div>
-                                  <div className="px-3 py-1 text-[10px] text-gray-500 font-mono border-b border-white/5">{editFilePath}</div>
+                                  <div className={`px-3 py-1 text-[10px] font-mono border-b ${isDark ? 'text-gray-500 border-white/5' : 'text-gray-400 border-gray-100'}`}>{editFilePath}</div>
                                   <pre className={`px-3 py-2 text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto ${
-                                    editResult?.status === 'denied' ? 'opacity-50' : 'text-gray-300'
+                                    editResult?.status === 'denied' ? 'opacity-50' : isDark ? 'text-gray-300' : 'text-gray-700'
                                   }`}>
                                     <code>{editContent}</code>
                                   </pre>
