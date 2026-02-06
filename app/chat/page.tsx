@@ -41,6 +41,7 @@ const NotebookMode = dynamic(() => import("../components/NotebookMode"), { ssr: 
 const DesignMode = dynamic(() => import("../components/DesignMode"), { ssr: false });
 const ProjectPanel = dynamic(() => import("../components/ProjectPanel"), { ssr: false });
 const DiffViewer = dynamic(() => import("@/app/components/DiffViewer"), { ssr: false });
+const MultiAgentMode = dynamic(() => import("../components/MultiAgentMode"), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -591,6 +592,7 @@ export default function ChatPage() {
   const [attachedFile, setAttachedFile] = useState<{ filename: string; textContent?: string | null } | null>(null);
   const [showNotebook, setShowNotebook] = useState(false);
   const [showDesignMode, setShowDesignMode] = useState(false);
+  const [showMultiAgent, setShowMultiAgent] = useState(false);
   const [agentTask, setAgentTask] = useState<string | null>(null);
 
   // Project panel state
@@ -1208,6 +1210,11 @@ export default function ChatPage() {
   // Design mode takes over the whole page
   if (showDesignMode) {
     return <DesignMode onClose={() => setShowDesignMode(false)} />;
+  }
+
+  // Multi-agent mode takes over the whole page
+  if (showMultiAgent) {
+    return <MultiAgentMode isDark={isDark} onClose={() => setShowMultiAgent(false)} />;
   }
 
   return (
@@ -1875,6 +1882,16 @@ export default function ChatPage() {
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                   <line x1="3" y1="9" x2="21" y2="9" />
                   <line x1="3" y1="15" x2="21" y2="15" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setShowMultiAgent(true)}
+                className="px-3 py-3 rounded-xl transition-colors border bg-white/5 border-white/10 text-gray-400 hover:text-purple-400 hover:bg-purple-500/10 hover:border-purple-500/30"
+                title="Multi-Agent TDD"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" /><circle cx="12" cy="16" r="3" />
+                  <line x1="10" y1="9.5" x2="12" y2="13.5" /><line x1="14" y1="9.5" x2="12" y2="13.5" />
                 </svg>
               </button>
               <button
