@@ -28,6 +28,7 @@ import {
   Layout,
   CreditCard,
   LayoutDashboard,
+  FolderOpen,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -48,6 +49,7 @@ interface SelectedElement {
   styles: Record<string, string>;
   selector: string;
   outerHTML: string;
+  rect?: { top: number; left: number; bottom: number; right: number };
 }
 
 type Viewport = "desktop" | "tablet" | "mobile";
@@ -248,27 +250,34 @@ const INSPECTOR_SCRIPT = `
     e.preventDefault();
     e.stopPropagation();
 
-    document.querySelectorAll('[data-ditb-selected]').forEach(function(el) {
-      el.style.outline = '';
-      el._ditb_selected = false;
-      delete el.dataset.ditbSelected;
-    });
+    if (!e.shiftKey) {
+      document.querySelectorAll('[data-ditb-selected]').forEach(function(el) {
+        el.style.outline = '';
+        el._ditb_selected = false;
+        delete el.dataset.ditbSelected;
+      });
+    }
 
-    e.target.dataset.ditbSelected = 'true';
-    e.target._ditb_selected = true;
-    e.target.style.outline = '2px solid #f97316';
+    if (e.target._ditb_selected) {
+      e.target.style.outline = '';
+      e.target._ditb_selected = false;
+      delete e.target.dataset.ditbSelected;
+    } else {
+      e.target.dataset.ditbSelected = 'true';
+      e.target._ditb_selected = true;
+      e.target.style.outline = '2px solid #f97316';
+    }
 
-    var computed = window.getComputedStyle(e.target);
-    var rect = e.target.getBoundingClientRect();
-
-    window.parent.postMessage({
-      type: 'element-selected',
-      data: {
-        tag: e.target.tagName.toLowerCase(),
-        id: e.target.id || null,
-        classes: Array.from(e.target.classList),
-        text: (e.target.textContent || '').slice(0, 100),
-        innerHTML: (e.target.innerHTML || '').slice(0, 500),
+    var allSelected = document.querySelectorAll('[data-ditb-selected]');
+    var elements = Array.from(allSelected).map(function(el) {
+      var computed = window.getComputedStyle(el);
+      var rect = el.getBoundingClientRect();
+      return {
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        classes: Array.from(el.classList),
+        text: (el.textContent || '').slice(0, 100),
+        innerHTML: (el.innerHTML || '').slice(0, 500),
         styles: {
           color: computed.color,
           backgroundColor: computed.backgroundColor,
@@ -282,10 +291,19 @@ const INSPECTOR_SCRIPT = `
           display: computed.display,
           position: computed.position,
         },
-        selector: buildSelector(e.target),
-        outerHTML: (e.target.outerHTML || '').slice(0, 300),
-      }
-    }, '*');
+        selector: buildSelector(el),
+        outerHTML: (el.outerHTML || '').slice(0, 300),
+        rect: { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right }
+      };
+    });
+
+    if (elements.length === 0) {
+      window.parent.postMessage({ type: 'element-deselected' }, '*');
+    } else if (elements.length === 1) {
+      window.parent.postMessage({ type: 'element-selected', data: elements[0] }, '*');
+    } else {
+      window.parent.postMessage({ type: 'elements-selected', data: elements }, '*');
+    }
   }, true);
 
   function buildSelector(el) {
@@ -342,6 +360,13 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
   const [copyFeedback, setCopyFeedback] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [popover, setPopover] = useState<{ x: number; y: number; visible: boolean } | null>(null);
+  const [popoverInput, setPopoverInput] = useState("");
+  const [multiSelect, setMultiSelect] = useState<SelectedElement[]>([]);
+  const [showProjectBrowser, setShowProjectBrowser] = useState(false);
+  const [projectPath, setProjectPath] = useState("");
+  const [projectFiles, setProjectFiles] = useState<Array<{ path: string; name: string; isDir: boolean }>>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -386,8 +411,29 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
     function handler(e: MessageEvent) {
       if (e.data?.type === "element-selected") {
         setSelectedElement(e.data.data as SelectedElement);
+        setMultiSelect([]);
         setEditHtmlValue(e.data.data.outerHTML);
         setEditingHtml(false);
+        // Calculate popover position
+        const iframe = iframeRef.current;
+        if (iframe && e.data.data.rect) {
+          const iframeRect = iframe.getBoundingClientRect();
+          const elemRect = e.data.data.rect;
+          setPopover({
+            x: iframeRect.left + elemRect.left,
+            y: iframeRect.top + elemRect.bottom + 8,
+            visible: true,
+          });
+        }
+        setPopoverInput("");
+      } else if (e.data?.type === "elements-selected") {
+        setMultiSelect(e.data.data as SelectedElement[]);
+        setSelectedElement(null);
+        setPopover(null);
+      } else if (e.data?.type === "element-deselected") {
+        setSelectedElement(null);
+        setMultiSelect([]);
+        setPopover(null);
       }
     }
     window.addEventListener("message", handler);
@@ -434,9 +480,9 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
   }, [isDragging]);
 
   /* ---- Send design instruction to API ---- */
-  async function sendInstruction() {
-    if (!instruction.trim() || loading) return;
-    const msg = instruction.trim();
+  async function sendInstruction(overrideMsg?: string) {
+    const msg = overrideMsg || instruction.trim();
+    if (!msg || loading) return;
     setInstruction("");
     setChatMessages((prev) => [...prev, { role: "user", text: msg }]);
     setLoading(true);
@@ -456,6 +502,14 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
                 styles: selectedElement.styles,
               }
             : null,
+          multiSelect: multiSelect.length > 1
+            ? multiSelect.map((el) => ({
+                selector: el.selector,
+                tag: el.tag,
+                outerHTML: el.outerHTML,
+                styles: el.styles,
+              }))
+            : undefined,
         }),
       });
 
@@ -522,6 +576,38 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
     setShowImport(false);
     setImportText("");
     setSelectedElement(null);
+  }
+
+  /* ---- Load project files ---- */
+  async function loadProject() {
+    if (!projectPath.trim()) return;
+    setLoadingFiles(true);
+    try {
+      const res = await fetch(`/api/design/files?dir=${encodeURIComponent(projectPath)}`);
+      const data = await res.json();
+      setProjectFiles(data.files || []);
+    } catch {}
+    setLoadingFiles(false);
+  }
+
+  async function loadProjectFile(filePath: string) {
+    try {
+      const fullPath = `${projectPath}/${filePath}`;
+      const res = await fetch("/api/design/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: fullPath }),
+      });
+      const data = await res.json();
+      if (data.content) {
+        if (data.content.includes("<html") || data.content.includes("<!DOCTYPE")) {
+          pushHtml(data.content);
+        } else {
+          pushHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>* { margin:0; padding:0; box-sizing:border-box; } body { font-family: system-ui; padding: 20px; background: #0f172a; color: #e2e8f0; }</style></head><body>${data.content}</body></html>`);
+        }
+        setShowProjectBrowser(false);
+      }
+    } catch {}
   }
 
   /* ================================================================ */
@@ -636,6 +722,94 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
     <div className="h-screen flex flex-col bg-gray-900 text-white select-none">
       {importModal}
 
+      {/* Element popover (mini chat box) */}
+      {popover?.visible && (
+        <div
+          className="fixed z-50 bg-gray-800 border border-orange-500/30 rounded-xl shadow-2xl p-3 w-80"
+          style={{ left: popover.x, top: popover.y }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs text-orange-400 font-mono">
+              &lt;{selectedElement?.tag}&gt;
+            </span>
+            {selectedElement?.text && (
+              <span className="text-xs text-gray-500 truncate">
+                &quot;{selectedElement.text.slice(0, 30)}&quot;
+              </span>
+            )}
+            <button onClick={() => setPopover(null)} className="ml-auto text-gray-500 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={popoverInput}
+              onChange={(e) => setPopoverInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && popoverInput.trim()) {
+                  sendInstruction(popoverInput);
+                  setPopover(null);
+                }
+              }}
+              placeholder="Make it blue, bigger, etc..."
+              className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500"
+              autoFocus
+            />
+            <button
+              onClick={() => {
+                if (popoverInput.trim()) {
+                  sendInstruction(popoverInput);
+                  setPopover(null);
+                }
+              }}
+              className="px-3 py-1.5 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600"
+            >
+              Go
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Project browser modal */}
+      {showProjectBrowser && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+          <div className="bg-gray-800 border border-white/10 rounded-2xl p-6 w-[500px] max-h-[600px] flex flex-col">
+            <h3 className="text-lg font-semibold mb-4">Open Project</h3>
+            <div className="flex gap-2 mb-4">
+              <input
+                value={projectPath}
+                onChange={(e) => setProjectPath(e.target.value)}
+                placeholder="/path/to/project"
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+                onKeyDown={(e) => e.key === "Enter" && loadProject()}
+              />
+              <button onClick={loadProject} className="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-500">
+                Browse
+              </button>
+            </div>
+            {loadingFiles && <Loader2 className="w-5 h-5 animate-spin mx-auto" />}
+            <div className="flex-1 overflow-y-auto space-y-0.5">
+              {projectFiles.map((f, i) => (
+                <button
+                  key={i}
+                  onClick={() => !f.isDir && loadProjectFile(f.path)}
+                  className={`w-full text-left px-3 py-1.5 rounded text-sm flex items-center gap-2 ${
+                    f.isDir ? "text-gray-500" : "text-gray-300 hover:bg-white/10 cursor-pointer"
+                  }`}
+                  style={{ paddingLeft: `${(f.path.split("/").length - 1) * 16 + 12}px` }}
+                >
+                  {f.isDir ? <FolderOpen className="w-3.5 h-3.5 text-blue-400" /> : <FileCode className="w-3.5 h-3.5 text-green-400" />}
+                  {f.name}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowProjectBrowser(false)} className="mt-4 px-4 py-2 bg-gray-700 rounded-lg text-sm hover:bg-gray-600">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Hidden file input for reference images */}
       <input
         ref={fileInputRef}
@@ -668,6 +842,12 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
             icon={<Upload className="w-4 h-4" />}
             label="Import"
             onClick={() => setShowImport(true)}
+          />
+          {/* Project */}
+          <ToolbarBtn
+            icon={<FolderOpen className="w-4 h-4" />}
+            label="Project"
+            onClick={() => setShowProjectBrowser(true)}
           />
           {/* Export */}
           <ToolbarBtn
@@ -778,6 +958,25 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
             )}
             <div ref={chatEndRef} />
           </div>
+
+          {/* Multi-select badge */}
+          {multiSelect.length > 1 && (
+            <div className="border-t border-white/10 bg-black/20 shrink-0">
+              <div className="p-3 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-orange-400" />
+                  <span className="text-sm font-medium text-orange-300">{multiSelect.length} elements selected</span>
+                </div>
+                <div className="mt-2 space-y-1">
+                  {multiSelect.map((el, i) => (
+                    <div key={i} className="text-xs text-gray-400 font-mono">
+                      &lt;{el.tag}&gt; {el.text?.slice(0, 30)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Selected element properties */}
           {selectedElement && (
@@ -905,7 +1104,7 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
                 className="flex-1 bg-gray-800 text-sm rounded-lg border border-white/10 px-3 py-2 focus:outline-none focus:border-blue-500/40 resize-none text-gray-200 placeholder:text-gray-600"
               />
               <button
-                onClick={sendInstruction}
+                onClick={() => sendInstruction()}
                 disabled={loading || !instruction.trim()}
                 className="px-3 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0 self-end"
                 style={{ height: "38px" }}
