@@ -148,6 +148,16 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     "typescript", "ts",
     "bash", "sh", "shell", "zsh",
     "ruby", "rb",
+    "go", "golang",
+    "rust", "rs",
+    "c", "cpp", "c++",
+    "swift",
+    "java",
+    "kotlin", "kt", "kts",
+    "php",
+    "perl", "pl",
+    "lua",
+    "r",
   ].includes(displayLang.toLowerCase());
 
   async function copyCode() {

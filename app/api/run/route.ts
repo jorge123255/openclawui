@@ -13,25 +13,63 @@ interface RunRequest {
   language: string;
 }
 
-function detectRuntime(language: string): { cmd: string; ext: string } | null {
+interface RuntimeInfo {
+  ext: string;
+  run: (file: string) => string;  // command to execute the file
+  cleanup?: (file: string) => string[];  // extra files to clean up
+}
+
+function detectRuntime(language: string): RuntimeInfo | null {
   const lang = language.toLowerCase().trim();
-  const map: Record<string, { cmd: string; ext: string }> = {
-    python: { cmd: "python3", ext: "py" },
-    python3: { cmd: "python3", ext: "py" },
-    py: { cmd: "python3", ext: "py" },
-    javascript: { cmd: "node", ext: "js" },
-    js: { cmd: "node", ext: "js" },
-    node: { cmd: "node", ext: "js" },
-    typescript: { cmd: "npx tsx", ext: "ts" },
-    ts: { cmd: "npx tsx", ext: "ts" },
-    bash: { cmd: "bash", ext: "sh" },
-    sh: { cmd: "bash", ext: "sh" },
-    shell: { cmd: "bash", ext: "sh" },
-    zsh: { cmd: "zsh", ext: "sh" },
-    ruby: { cmd: "ruby", ext: "rb" },
-    rb: { cmd: "ruby", ext: "rb" },
+
+  // Interpreted languages — just run the file
+  const interpreted: Record<string, RuntimeInfo> = {
+    python:     { ext: "py",  run: (f) => `python3 "${f}"` },
+    python3:    { ext: "py",  run: (f) => `python3 "${f}"` },
+    py:         { ext: "py",  run: (f) => `python3 "${f}"` },
+    javascript: { ext: "js",  run: (f) => `node "${f}"` },
+    js:         { ext: "js",  run: (f) => `node "${f}"` },
+    node:       { ext: "js",  run: (f) => `node "${f}"` },
+    typescript: { ext: "ts",  run: (f) => `npx tsx "${f}"` },
+    ts:         { ext: "ts",  run: (f) => `npx tsx "${f}"` },
+    bash:       { ext: "sh",  run: (f) => `bash "${f}"` },
+    sh:         { ext: "sh",  run: (f) => `bash "${f}"` },
+    shell:      { ext: "sh",  run: (f) => `bash "${f}"` },
+    zsh:        { ext: "sh",  run: (f) => `zsh "${f}"` },
+    ruby:       { ext: "rb",  run: (f) => `ruby "${f}"` },
+    rb:         { ext: "rb",  run: (f) => `ruby "${f}"` },
+    php:        { ext: "php", run: (f) => `php "${f}"` },
+    perl:       { ext: "pl",  run: (f) => `perl "${f}"` },
+    pl:         { ext: "pl",  run: (f) => `perl "${f}"` },
+    lua:        { ext: "lua", run: (f) => `lua "${f}"` },
+    r:          { ext: "R",   run: (f) => `Rscript "${f}"` },
   };
-  return map[lang] || null;
+
+  if (interpreted[lang]) return interpreted[lang];
+
+  // Compiled languages — compile then run
+  const compiled: Record<string, RuntimeInfo> = {
+    c:      { ext: "c",     run: (f) => `gcc -o "${f}.out" "${f}" && "${f}.out"`,              cleanup: (f) => [`${f}.out`] },
+    cpp:    { ext: "cpp",   run: (f) => `g++ -o "${f}.out" "${f}" -std=c++17 && "${f}.out"`,   cleanup: (f) => [`${f}.out`] },
+    "c++":  { ext: "cpp",   run: (f) => `g++ -o "${f}.out" "${f}" -std=c++17 && "${f}.out"`,   cleanup: (f) => [`${f}.out`] },
+    go:     { ext: "go",    run: (f) => `go run "${f}"` },
+    golang: { ext: "go",    run: (f) => `go run "${f}"` },
+    rust:   { ext: "rs",    run: (f) => `rustc -o "${f}.out" "${f}" && "${f}.out"`,            cleanup: (f) => [`${f}.out`] },
+    rs:     { ext: "rs",    run: (f) => `rustc -o "${f}.out" "${f}" && "${f}.out"`,            cleanup: (f) => [`${f}.out`] },
+    swift:  { ext: "swift", run: (f) => `swift "${f}"` },
+    java:   { ext: "java",  run: (f) => {
+      // Java needs special handling — class name must match filename
+      // We use --source flag to skip that requirement
+      return `java --source 21 "${f}"`;
+    }},
+    kotlin: { ext: "kts",   run: (f) => `kotlin "${f}"` },
+    kt:     { ext: "kts",   run: (f) => `kotlin "${f}"` },
+    kts:    { ext: "kts",   run: (f) => `kotlin "${f}"` },
+  };
+
+  if (compiled[lang]) return compiled[lang];
+
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -47,7 +85,7 @@ export async function POST(request: Request) {
 
     if (!runtime) {
       return NextResponse.json({
-        error: `Unsupported language: ${lang}. Supported: python, javascript, typescript, bash, ruby`,
+        error: `Unsupported language: ${lang}. Supported: python, javascript, typescript, bash, go, rust, c, c++, swift, java, kotlin, php, perl, lua, ruby, r`,
       }, { status: 400 });
     }
 
@@ -65,12 +103,25 @@ export async function POST(request: Request) {
     const startTime = Date.now();
 
     try {
-      stdout = execSync(`${runtime.cmd} "${tmpFile}" 2>&1`, {
+      const command = runtime.run(tmpFile);
+      stdout = execSync(`${command} 2>&1`, {
         encoding: "utf-8",
         timeout: TIMEOUT * 1000,
         maxBuffer: 1024 * 1024,
         cwd: homedir(),
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: "1",
+          // Ensure Homebrew/cargo/go paths are available
+          PATH: [
+            process.env.PATH,
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/go/bin",
+            `${homedir()}/.cargo/bin`,
+            `${homedir()}/go/bin`,
+          ].filter(Boolean).join(":"),
+        },
       });
     } catch (e: any) {
       exitCode = e.status || 1;
@@ -80,8 +131,13 @@ export async function POST(request: Request) {
 
     const elapsed = Date.now() - startTime;
 
-    // Cleanup
+    // Cleanup source file + any compiled artifacts
     try { unlinkSync(tmpFile); } catch {}
+    if (runtime.cleanup) {
+      for (const f of runtime.cleanup(tmpFile)) {
+        try { unlinkSync(f); } catch {}
+      }
+    }
 
     // Truncate output if too long
     let output = (stdout + (stderr ? "\n" + stderr : "")).trim();
