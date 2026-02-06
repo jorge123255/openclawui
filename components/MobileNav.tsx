@@ -20,8 +20,8 @@ const navItems = [
 export default function MobileNav() {
   const pathname = usePathname();
 
-  // Don't show on setup page
-  if (pathname === "/setup") return null;
+  // Don't show on setup or chat pages (chat has its own layout)
+  if (pathname === "/setup" || pathname === "/chat") return null;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-black/90 backdrop-blur-lg border-t border-white/10 pb-safe">

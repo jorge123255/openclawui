@@ -64,8 +64,10 @@ async function buildSystemPrompt(config: any): Promise<string> {
   return parts.join("\n");
 }
 
+const MAX_HISTORY_MESSAGES = 40; // Cap conversation history to prevent context overflow
+
 export async function POST(request: Request) {
-  const { message, messages: history, sessionKey } = await request.json();
+  const { message, messages: history, sessionKey, stream: wantStream } = await request.json();
 
   if (!message && (!history || history.length === 0)) {
     return NextResponse.json({ error: "Message required" }, { status: 400 });
@@ -77,17 +79,18 @@ export async function POST(request: Request) {
 
   const systemPrompt = await buildSystemPrompt(config);
   
-  // Build messages array: system prompt + full history
+  // Build messages array: system prompt + capped history
   const apiMessages: Array<{role: string; content: string}> = [];
   apiMessages.push({ role: "system", content: systemPrompt });
   
   if (history && history.length > 0) {
-    // Send full conversation history
-    for (const msg of history) {
+    // Cap history to prevent context overflow
+    const cappedHistory = history.slice(-MAX_HISTORY_MESSAGES);
+    for (const msg of cappedHistory) {
       apiMessages.push({ role: msg.role, content: msg.content });
     }
     // Add the new message if it's not already the last one
-    const lastMsg = history[history.length - 1];
+    const lastMsg = cappedHistory[cappedHistory.length - 1];
     if (message && lastMsg?.content !== message) {
       apiMessages.push({ role: "user", content: message });
     }
@@ -105,6 +108,61 @@ export async function POST(request: Request) {
   }
 
   try {
+    // ─── Streaming mode ──────────────────────────────────────────────
+    if (wantStream) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: "default",
+          messages: apiMessages,
+          stream: true,
+          user: sessionKey || "webchat-ui",
+        }),
+        signal: AbortSignal.timeout(120000),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Gateway stream error:", res.status, text);
+        return NextResponse.json({
+          success: false,
+          error: `Gateway error: ${res.status}`,
+        });
+      }
+
+      // Proxy the SSE stream from gateway to frontend
+      const stream = new ReadableStream({
+        async start(controller) {
+          const reader = res.body?.getReader();
+          if (!reader) {
+            controller.close();
+            return;
+          }
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+            }
+          } catch (e) {
+            // Stream interrupted
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
+
+    // ─── Non-streaming mode ──────────────────────────────────────────
     const res = await fetch(url, {
       method: "POST",
       headers,
