@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { 
-  FolderOpen, FileCode, ChevronRight, ChevronDown, Search, 
-  Loader2, X, RefreshCw, Zap, GitBranch, Package, Globe
+  FolderOpen, FileCode, ChevronRight, ChevronDown, ChevronLeft, Search, 
+  Loader2, X, RefreshCw, Zap, GitBranch, Package, Globe, Home
 } from "lucide-react";
 
 interface FileNode {
@@ -17,6 +17,8 @@ interface FileNode {
 
 interface ProjectAnalysis {
   name: string;
+  description: string | null;
+  version: string | null;
   path: string;
   framework: string | null;
   language: string;
@@ -34,6 +36,11 @@ interface ProjectAnalysis {
   totalFiles: number;
   totalSize: number;
   dependencies: Record<string, string>;
+}
+
+interface BrowseFolder {
+  name: string;
+  path: string;
 }
 
 interface ProjectPanelProps {
@@ -104,6 +111,21 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
   const [fileFilter, setFileFilter] = useState("");
   const [error, setError] = useState("");
 
+  // Folder browser state
+  const [browsePath, setBrowsePath] = useState("");
+  const [browseFolders, setBrowseFolders] = useState<BrowseFolder[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
+
+  // Project detail toggles
+  const [showDeps, setShowDeps] = useState(false);
+  const [showScripts, setShowScripts] = useState(false);
+
+  // Load folder browser on mount
+  useEffect(() => {
+    browseDirectory("");
+  }, []);
+
   function toggleDir(path: string) {
     setExpandedDirs(prev => {
       const next = new Set(prev);
@@ -112,15 +134,35 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
     });
   }
 
-  async function analyzeProject() {
-    if (!projectPath.trim()) return;
+  async function browseDirectory(dir: string) {
+    setBrowseLoading(true);
+    try {
+      const url = dir ? `/api/project/browse?dir=${encodeURIComponent(dir)}` : "/api/project/browse";
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.folders) {
+        setBrowsePath(data.current);
+        setBrowseFolders(data.folders);
+      }
+    } catch {}
+    setBrowseLoading(false);
+  }
+
+  async function selectFolder(path: string) {
+    setProjectPath(path);
+    analyzeProject(path);
+  }
+
+  async function analyzeProject(pathOverride?: string) {
+    const targetPath = (pathOverride || projectPath).trim();
+    if (!targetPath) return;
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/project/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: projectPath.trim() }),
+        body: JSON.stringify({ path: targetPath }),
       });
       const data = await res.json();
       if (data.error) {
@@ -166,32 +208,106 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
         </button>
       </div>
 
-      {/* Project path input */}
+      {/* Folder browser (when no project loaded) */}
       {!analysis ? (
-        <div className="p-3 space-y-3">
-          <input
-            value={projectPath}
-            onChange={(e) => setProjectPath(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && analyzeProject()}
-            placeholder="/path/to/project"
-            className="w-full bg-gray-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-          />
-          <button
-            onClick={analyzeProject}
-            disabled={loading || !projectPath.trim()}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-            {loading ? "Analyzing..." : "Open & Analyze"}
-          </button>
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          
-          <div className="text-xs text-gray-500 space-y-1">
-            <p>Examples:</p>
-            <button onClick={() => setProjectPath("/Users/gszulc/clawd/projects/openclawui")} className="block text-blue-400 hover:underline truncate w-full text-left">
-              ~/clawd/projects/openclawui
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Quick access bar */}
+          <div className="flex items-center gap-1 px-3 py-2 border-b border-white/10">
+            <button onClick={() => browseDirectory("")} className="px-2 py-1 text-xs rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10" title="Home">
+              <Home className="w-3 h-3" />
+            </button>
+            <button onClick={() => browseDirectory("/Volumes")} className="px-2 py-1 text-xs rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10">
+              Volumes
+            </button>
+            <div className="flex-1" />
+            <button onClick={() => setShowManualInput(!showManualInput)} className="px-2 py-1 text-xs rounded text-gray-500 hover:text-white">
+              {showManualInput ? "Browse" : "Type path"}
             </button>
           </div>
+
+          {showManualInput ? (
+            /* Manual text input (legacy UI) */
+            <div className="p-3 space-y-2">
+              <input
+                value={projectPath}
+                onChange={(e) => setProjectPath(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && analyzeProject()}
+                placeholder="/path/to/project"
+                className="w-full bg-gray-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={() => analyzeProject()}
+                disabled={loading || !projectPath.trim()}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                {loading ? "Analyzing..." : "Open & Analyze"}
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Current path breadcrumb */}
+              <div className="px-3 py-2 border-b border-white/5">
+                <div className="flex items-center gap-1 text-xs text-gray-500 truncate">
+                  <FolderOpen className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{browsePath}</span>
+                </div>
+              </div>
+
+              {/* Folder list */}
+              <div className="flex-1 overflow-y-auto">
+                {/* Up button */}
+                {browsePath && browsePath !== "/" && (
+                  <button
+                    onClick={() => {
+                      const parent = browsePath.split("/").slice(0, -1).join("/") || "/";
+                      browseDirectory(parent);
+                    }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:bg-white/5"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Up</span>
+                  </button>
+                )}
+
+                {browseLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                  </div>
+                ) : browseFolders.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-gray-500 text-center">No subdirectories</div>
+                ) : (
+                  browseFolders.map(f => (
+                    <div key={f.path} className="flex items-center group">
+                      <button
+                        onClick={() => browseDirectory(f.path)}
+                        className="flex-1 text-left flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:bg-white/5 truncate"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5 shrink-0 text-gray-500" />
+                        <span className="truncate">{f.name}</span>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); selectFolder(f.path); }}
+                        className="px-2 py-1 mr-2 text-xs text-blue-400 bg-blue-500/10 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        title="Open as project"
+                      >
+                        Open
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+
+          {error && <p className="px-3 py-2 text-xs text-red-400">{error}</p>}
+
+          {loading && (
+            <div className="px-3 py-2 border-t border-white/10 flex items-center gap-2 text-xs text-gray-400">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Analyzing project...
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -199,7 +315,7 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
           <div className="p-3 border-b border-white/10 space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="font-medium text-sm text-white">{analysis.name}</h3>
-              <button onClick={() => { setAnalysis(null); setProjectPath(""); }} className="text-xs text-gray-500 hover:text-white">
+              <button onClick={() => { setAnalysis(null); setProjectPath(""); setShowDeps(false); setShowScripts(false); }} className="text-xs text-gray-500 hover:text-white">
                 Change
               </button>
             </div>
@@ -225,6 +341,70 @@ export default function ProjectPanel({ onClose, onFileOpen, onProjectLoaded }: P
               <div className="text-xs text-gray-500">
                 {analysis.routes.length > 0 && <span>{analysis.routes.length} routes • </span>}
                 {analysis.components.length > 0 && <span>{analysis.components.length} components</span>}
+              </div>
+            )}
+
+            {/* Description */}
+            {analysis.description && (
+              <p className="text-xs text-gray-400 italic">{analysis.description}</p>
+            )}
+
+            {/* Version */}
+            {analysis.version && (
+              <p className="text-xs text-gray-500">v{analysis.version}</p>
+            )}
+
+            {/* Key dependencies */}
+            {Object.keys(analysis.dependencies).length > 0 && (
+              <div className="mt-2">
+                <button onClick={() => setShowDeps(!showDeps)} className="flex items-center gap-1 text-xs text-gray-500 hover:text-white">
+                  {showDeps ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  Dependencies ({Object.keys(analysis.dependencies).length})
+                </button>
+                {showDeps && (
+                  <div className="mt-1 ml-4 space-y-0.5 max-h-32 overflow-y-auto">
+                    {Object.entries(analysis.dependencies).map(([name, ver]) => (
+                      <div key={name} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-400 truncate">{name}</span>
+                        <span className="text-gray-600 shrink-0 ml-2">{String(ver)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Scripts */}
+            {Object.keys(analysis.scripts).length > 0 && (
+              <div className="mt-2">
+                <button onClick={() => setShowScripts(!showScripts)} className="flex items-center gap-1 text-xs text-gray-500 hover:text-white">
+                  {showScripts ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  Scripts ({Object.keys(analysis.scripts).length})
+                </button>
+                {showScripts && (
+                  <div className="mt-1 ml-4 space-y-0.5">
+                    {Object.entries(analysis.scripts).map(([name, cmd]) => (
+                      <div key={name} className="text-xs">
+                        <span className="text-green-400 font-mono">{name}</span>
+                        <span className="text-gray-600 ml-2 truncate">{String(cmd).slice(0, 40)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Entry points */}
+            {analysis.entryPoints.length > 0 && (
+              <div className="mt-2 text-xs text-gray-500">
+                <span className="text-gray-400">Entry:</span> {analysis.entryPoints.join(", ")}
+              </div>
+            )}
+
+            {/* Config files */}
+            {analysis.configFiles.length > 0 && (
+              <div className="mt-1 text-xs text-gray-500">
+                <span className="text-gray-400">Config:</span> {analysis.configFiles.join(", ")}
               </div>
             )}
           </div>

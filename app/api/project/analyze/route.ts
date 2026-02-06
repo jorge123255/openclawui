@@ -4,6 +4,8 @@ import { join, extname, basename } from "path";
 
 interface ProjectAnalysis {
   name: string;
+  description: string | null;
+  version: string | null;
   path: string;
   framework: string | null;
   language: string;
@@ -124,6 +126,8 @@ function detectFramework(dir: string, pkg: any): { framework: string | null; lan
 function buildSummary(analysis: Omit<ProjectAnalysis, "summary">): string {
   const parts: string[] = [];
   parts.push(`Project: ${analysis.name}`);
+  if (analysis.description) parts.push(`Description: ${analysis.description}`);
+  if (analysis.version) parts.push(`Version: ${analysis.version}`);
   if (analysis.framework) parts.push(`Framework: ${analysis.framework}`);
   parts.push(`Language: ${analysis.language}`);
   parts.push(`Files: ${analysis.totalFiles} (${(analysis.totalSize / 1024).toFixed(0)}KB)`);
@@ -197,6 +201,8 @@ export async function POST(request: Request) {
     
     const analysis: Omit<ProjectAnalysis, "summary"> = {
       name: pkg.name || basename(projectPath),
+      description: pkg.description || null,
+      version: pkg.version || null,
       path: projectPath,
       framework,
       language,
