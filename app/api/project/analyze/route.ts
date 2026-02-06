@@ -227,6 +227,7 @@ export async function POST(request: Request) {
     
     return NextResponse.json({
       ...analysis,
+      path: projectPath,
       summary: buildSummary(analysis),
     });
   } catch (e: any) {

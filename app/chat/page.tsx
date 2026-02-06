@@ -600,6 +600,7 @@ export default function ChatPage() {
 
   // Diff viewer & checkpoints state
   const [diffView, setDiffView] = useState<null | { filePath: string; isNew: boolean; diff: string; oldContent: string; newContent: string; stats: { additions: number; deletions: number } }>(null);
+  const [diffEditId, setDiffEditId] = useState<string | null>(null);
   const [checkpoints, setCheckpoints] = useState<any[]>([]);
   const [showCheckpoints, setShowCheckpoints] = useState(false);
 
@@ -1070,7 +1071,7 @@ export default function ChatPage() {
 
   const projectPath = projectAnalysis?.path || null;
 
-  async function showDiff(filePath: string, newContent: string) {
+  async function showDiff(filePath: string, newContent: string, editId?: string) {
     const res = await fetch("/api/project/diff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1079,16 +1080,33 @@ export default function ChatPage() {
     const data = await res.json();
     if (data.error) return;
     setDiffView(data);
+    setDiffEditId(editId || null);
   }
 
   async function applyDiff() {
     if (!diffView) return;
-    await fetch("/api/project/apply", {
+    const res = await fetch("/api/project/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filePath: diffView.filePath, content: diffView.newContent }),
     });
+    const data = await res.json();
+    if (diffEditId) {
+      setCommandResults(prev => ({
+        ...prev,
+        [diffEditId]: { output: data.ok ? `Written to ${diffView.filePath}` : (data.error || 'Failed'), code: data.ok ? 0 : 1, status: 'done' }
+      }));
+    }
     setDiffView(null);
+    setDiffEditId(null);
+  }
+
+  function rejectDiff() {
+    if (diffEditId) {
+      setCommandResults(prev => ({ ...prev, [diffEditId]: { output: '', code: 0, status: 'denied' } }));
+    }
+    setDiffView(null);
+    setDiffEditId(null);
   }
 
   async function createCheckpoint(name?: string) {
@@ -1496,15 +1514,107 @@ export default function ChatPage() {
                             );
                           }
 
-                          return segment.type === "code" ? (
-                            <CodeBlock
-                              key={segIdx}
-                              code={segment.content}
-                              language={segment.language || "code"}
-                              onPreviewHtml={setHtmlPreview}
-                              codeTheme={theme}
-                            />
-                          ) : (
+                          // Check if code block represents a file edit (first line is a filepath comment)
+                          if (segment.type === "code") {
+                            const lines = segment.content.split("\n");
+                            const firstLine = lines[0]?.trim() || "";
+                            const filePathMatch = firstLine.match(/^(?:\/\/|#|--|\/\*)\s*(?:filepath|file|path):\s*(.+?)(?:\s*\*\/)?$/i);
+                            const editId = `edit-${msg.id}-${segIdx}`;
+
+                            if (filePathMatch) {
+                              const editFilePath = filePathMatch[1].trim();
+                              const editContent = lines.slice(1).join("\n");
+                              const editResult = commandResults[editId];
+
+                              return (
+                                <div key={segIdx} className={`my-2 rounded-lg border ${
+                                  editResult?.status === 'denied'
+                                    ? 'border-red-500/20 bg-red-500/5'
+                                    : editResult?.status === 'done'
+                                    ? 'border-green-500/20 bg-green-500/5'
+                                    : 'border-purple-500/30 bg-purple-500/5'
+                                } overflow-hidden`}>
+                                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                                    <div className="flex items-center gap-2">
+                                      <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                      </svg>
+                                      <span className="text-xs font-medium text-gray-400">File Edit</span>
+                                      <code className="text-[10px] bg-white/5 px-1.5 py-0.5 rounded text-purple-300">{editFilePath.split("/").pop()}</code>
+                                    </div>
+                                    {!editResult && (
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={() => showDiff(editFilePath, editContent, editId)}
+                                          className="flex items-center gap-1 px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-md transition-colors"
+                                        >
+                                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 3v18M3 12h18" /></svg>
+                                          Review Diff
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            setCommandResults(prev => ({ ...prev, [editId]: { output: '', code: 0, status: 'running' } }));
+                                            const res = await fetch("/api/project/apply", {
+                                              method: "POST",
+                                              headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ filePath: editFilePath, content: editContent }),
+                                            });
+                                            const data = await res.json();
+                                            setCommandResults(prev => ({
+                                              ...prev,
+                                              [editId]: { output: data.ok ? `Written to ${editFilePath}` : data.error, code: data.ok ? 0 : 1, status: 'done' }
+                                            }));
+                                          }}
+                                          className="flex items-center gap-1 px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded-md transition-colors"
+                                        >
+                                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                                          Apply
+                                        </button>
+                                        <button
+                                          onClick={() => denyCommand(editId)}
+                                          className="flex items-center gap-1 px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 text-xs rounded-md transition-colors"
+                                        >
+                                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                          Reject
+                                        </button>
+                                      </div>
+                                    )}
+                                    {editResult?.status === 'running' && (
+                                      <span className="text-xs text-yellow-400">Writing...</span>
+                                    )}
+                                    {editResult?.status === 'done' && (
+                                      <span className={`text-xs ${editResult.code === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                        {editResult.code === 0 ? '✓ Applied' : '✗ Failed'}
+                                      </span>
+                                    )}
+                                    {editResult?.status === 'denied' && (
+                                      <span className="text-xs text-red-400">✗ Rejected</span>
+                                    )}
+                                  </div>
+                                  <div className="px-3 py-1 text-[10px] text-gray-500 font-mono border-b border-white/5">{editFilePath}</div>
+                                  <pre className={`px-3 py-2 text-xs font-mono overflow-x-auto max-h-48 overflow-y-auto ${
+                                    editResult?.status === 'denied' ? 'opacity-50' : 'text-gray-300'
+                                  }`}>
+                                    <code>{editContent}</code>
+                                  </pre>
+                                  {editResult?.status === 'done' && editResult.output && (
+                                    <div className="border-t border-white/10 px-3 py-1.5 text-xs text-gray-400">{editResult.output}</div>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <CodeBlock
+                                key={segIdx}
+                                code={segment.content}
+                                language={segment.language || "code"}
+                                onPreviewHtml={setHtmlPreview}
+                                codeTheme={theme}
+                              />
+                            );
+                          }
+                          return (
                             <div
                               key={segIdx}
                               className="whitespace-pre-wrap break-words"
@@ -1844,8 +1954,8 @@ export default function ChatPage() {
         <DiffViewer
           {...diffView}
           onApprove={applyDiff}
-          onReject={() => setDiffView(null)}
-          onClose={() => setDiffView(null)}
+          onReject={rejectDiff}
+          onClose={() => { setDiffView(null); setDiffEditId(null); }}
         />
       )}
     </div>
