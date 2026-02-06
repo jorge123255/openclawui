@@ -871,8 +871,16 @@ export default function ChatPage() {
               if (data === "[DONE]") continue;
               try {
                 const parsed = JSON.parse(data);
-                if (parsed.token || parsed.content || parsed.text || parsed.delta?.content) {
-                  accumulated += parsed.token || parsed.content || parsed.text || parsed.delta?.content || "";
+                // Support multiple SSE formats: OpenAI (choices[0].delta.content), simple (token/content/text)
+                const token =
+                  parsed.choices?.[0]?.delta?.content ||
+                  parsed.delta?.content ||
+                  parsed.token ||
+                  parsed.content ||
+                  parsed.text ||
+                  "";
+                if (token) {
+                  accumulated += token;
                 }
               } catch {
                 accumulated += data;
