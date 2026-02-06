@@ -90,13 +90,6 @@ const WIZARD_CONFIGS: Record<string, WizardStep> = {
       { key: "skills.entries.browser-use.apiKey", label: "API Key", type: "password", placeholder: "bu_...", required: true },
     ],
   },
-  mcp: {
-    service: "mcp",
-    name: "MCP Tools Server",
-    fields: [
-      { key: "env.MCP_SERVER_URL", label: "Server URL", type: "url", placeholder: "http://localhost:3000", required: true },
-    ],
-  },
   "mcp-tools": {
     service: "mcp-tools",
     name: "MCP Tools Server",
@@ -540,7 +533,9 @@ export default function IntegrationsPage() {
               <span className="font-medium text-foreground">Add Integration</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {Object.entries(WIZARD_CONFIGS).map(([id, config]) => (
+              {Object.entries(WIZARD_CONFIGS)
+                .filter(([id]) => !integrations.some(i => i.id === id && i.status === "connected"))
+                .map(([id, config]) => (
                 <button
                   key={id}
                   onClick={() => openWizard(id)}

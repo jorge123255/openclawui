@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { execSync, spawn } from "child_process";
 
 export async function POST(request: Request) {
   const { url, model } = await request.json();
@@ -9,54 +10,52 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Start pull with streaming enabled
-    const res = await fetch(`${ollamaUrl}/api/pull`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: model, stream: true }),
-    });
-
-    if (!res.ok) {
-      const error = await res.text();
-      return NextResponse.json({ error: error || "Failed to start pull" }, { status: 500 });
-    }
-
-    // Stream the response back to the client
-    const reader = res.body?.getReader();
-    if (!reader) {
-      return NextResponse.json({ error: "No response body" }, { status: 500 });
-    }
+    // Use curl with streaming - pipe through line by line
+    const json = JSON.stringify({ name: model, stream: true }).replace(/'/g, "'\\''");
+    const child = spawn("curl", [
+      "-s", "-X", "POST",
+      "-H", "Content-Type: application/json",
+      "-d", JSON.stringify({ name: model, stream: true }),
+      `${ollamaUrl}/api/pull`,
+    ]);
 
     const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
 
     const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+      start(controller) {
+        let buffer = "";
 
-            // Ollama sends newline-delimited JSON
-            const text = decoder.decode(value);
-            const lines = text.split("\n").filter(Boolean);
+        child.stdout.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-            for (const line of lines) {
-              try {
-                const data = JSON.parse(line);
-                // Send progress update
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-              } catch {
-                // Skip malformed lines
-              }
-            }
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            } catch {}
+          }
+        });
+
+        child.stderr.on("data", () => {});
+
+        child.on("close", (code) => {
+          if (buffer.trim()) {
+            try {
+              const data = JSON.parse(buffer);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            } catch {}
           }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
           controller.close();
-        } catch (error: any) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: error.message })}\n\n`));
+        });
+
+        child.on("error", (err) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: err.message })}\n\n`));
           controller.close();
-        }
+        });
       },
     });
 

@@ -1,4 +1,17 @@
 import { NextResponse } from "next/server";
+import { execSync } from "child_process";
+
+function curlGet(url: string, timeoutSec: number = 5): string {
+  return execSync(`curl -m ${timeoutSec} -s "${url}"`, { encoding: "utf-8" });
+}
+
+function curlPost(url: string, body: any, timeoutSec: number = 10): string {
+  const json = JSON.stringify(body).replace(/'/g, "'\\''");
+  return execSync(
+    `curl -m ${timeoutSec} -s -X POST -H "Content-Type: application/json" -d '${json}' "${url}"`,
+    { encoding: "utf-8" }
+  );
+}
 
 export async function POST(request: Request) {
   const { action, url, model } = await request.json();
@@ -7,13 +20,13 @@ export async function POST(request: Request) {
   try {
     switch (action) {
       case "status":
-        return await checkStatus(ollamaUrl);
+        return checkStatus(ollamaUrl);
       case "models":
-        return await listModels(ollamaUrl);
+        return listModels(ollamaUrl);
       case "pull":
-        return await pullModel(ollamaUrl, model);
+        return pullModel(ollamaUrl, model);
       case "delete":
-        return await deleteModel(ollamaUrl, model);
+        return deleteModel(ollamaUrl, model);
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
@@ -25,99 +38,69 @@ export async function POST(request: Request) {
   }
 }
 
-async function checkStatus(url: string) {
+function checkStatus(url: string) {
   try {
-    const res = await fetch(`${url}/api/tags`, { 
-      signal: AbortSignal.timeout(5000) 
-    });
-    if (res.ok) {
-      return NextResponse.json({ online: true });
-    }
-    return NextResponse.json({ online: false });
+    const raw = curlGet(`${url}/api/tags`, 5);
+    const data = JSON.parse(raw);
+    return NextResponse.json({ online: !!data });
   } catch {
     return NextResponse.json({ online: false });
   }
 }
 
-async function listModels(url: string) {
+function listModels(url: string) {
   try {
-    const res = await fetch(`${url}/api/tags`, {
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!res.ok) {
-      throw new Error("Failed to fetch models");
-    }
-    const data = await res.json();
-    return NextResponse.json({ 
+    const raw = curlGet(`${url}/api/tags`, 10);
+    const data = JSON.parse(raw);
+    return NextResponse.json({
       models: data.models || [],
-      success: true 
+      success: true,
     });
   } catch (error: any) {
-    return NextResponse.json({ 
-      models: [], 
+    return NextResponse.json({
+      models: [],
       success: false,
-      error: error.message 
+      error: error.message,
     });
   }
 }
 
-async function pullModel(url: string, model: string) {
+function pullModel(url: string, model: string) {
   if (!model) {
     return NextResponse.json({ error: "Model name required" }, { status: 400 });
   }
-
   try {
-    // Start the pull - this is async on Ollama's side
-    const res = await fetch(`${url}/api/pull`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: model, stream: false }),
-      signal: AbortSignal.timeout(300000), // 5 minute timeout for large models
-    });
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(error || "Failed to pull model");
-    }
-
-    return NextResponse.json({ 
+    const raw = curlPost(`${url}/api/pull`, { name: model, stream: false }, 300);
+    return NextResponse.json({
       success: true,
-      message: `Model ${model} pulled successfully`
+      message: `Model ${model} pulled successfully`,
     });
   } catch (error: any) {
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: false,
-      error: error.message 
+      error: error.message,
     });
   }
 }
 
-async function deleteModel(url: string, model: string) {
+function deleteModel(url: string, model: string) {
   if (!model) {
     return NextResponse.json({ error: "Model name required" }, { status: 400 });
   }
-
   try {
-    const res = await fetch(`${url}/api/delete`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: model }),
-      signal: AbortSignal.timeout(30000),
-    });
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(error || "Failed to delete model");
-    }
-
-    return NextResponse.json({ 
+    const json = JSON.stringify({ name: model }).replace(/'/g, "'\\''");
+    execSync(
+      `curl -m 30 -s -X DELETE -H "Content-Type: application/json" -d '${json}' "${url}/api/delete"`,
+      { encoding: "utf-8" }
+    );
+    return NextResponse.json({
       success: true,
-      message: `Model ${model} deleted`
+      message: `Model ${model} deleted`,
     });
   } catch (error: any) {
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: false,
-      error: error.message 
+      error: error.message,
     });
   }
 }

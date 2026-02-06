@@ -139,10 +139,15 @@ export default function ModelsPage() {
   async function checkOllama(url: string) {
     setOllamaStatus("checking");
     try {
-      const res = await fetch(`${url}/api/tags`);
-      if (res.ok) {
-        const data = await res.json();
-        setOllamaModels(data.models || []);
+      // Use our proxy API route (direct fetch blocked by macOS Sequoia)
+      const res = await fetch("/api/ollama", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "models", url }),
+      });
+      const data = await res.json();
+      if (data.success && data.models) {
+        setOllamaModels(data.models);
         setOllamaStatus("online");
       } else {
         setOllamaStatus("offline");
