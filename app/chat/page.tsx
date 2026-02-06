@@ -22,6 +22,53 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  streaming?: boolean;
+}
+
+function renderMarkdown(text: string): string {
+  // 1. Escape HTML entities first (sanitize)
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+  // 2. Code blocks (``` ... ```) — must come before inline code
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, _lang, code) => {
+    return `<pre style="background:#1e1e2e;border-radius:8px;padding:12px 16px;overflow-x:auto;margin:8px 0;font-size:0.85em;line-height:1.5"><code>${code.replace(/\n$/, "")}</code></pre>`;
+  });
+
+  // 3. Inline code (`...`)
+  html = html.replace(/`([^`\n]+)`/g, '<code style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:0.9em">$1</code>');
+
+  // 4. Bold (**...**)
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+  // 5. Italic (*...*) — but not inside already-processed bold
+  html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
+
+  // 6. Headings (### ... , ## ... , # ...)
+  html = html.replace(/^### (.+)$/gm, '<div style="font-size:1.1em;font-weight:700;margin:12px 0 4px">$1</div>');
+  html = html.replace(/^## (.+)$/gm, '<div style="font-size:1.2em;font-weight:700;margin:14px 0 4px">$1</div>');
+  html = html.replace(/^# (.+)$/gm, '<div style="font-size:1.35em;font-weight:700;margin:16px 0 6px">$1</div>');
+
+  // 7. Unordered list items (- item or * item)
+  html = html.replace(/^[\-\*] (.+)$/gm, '<div style="padding-left:16px">• $1</div>');
+
+  // 8. Links [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
+
+  // 9. Line breaks (preserve newlines outside of pre blocks)
+  // Split by pre blocks to avoid double-processing
+  const parts = html.split(/(<pre[\s\S]*?<\/pre>)/g);
+  html = parts
+    .map((part, i) => {
+      if (i % 2 === 1) return part; // pre block, leave alone
+      return part.replace(/\n/g, "<br>");
+    })
+    .join("");
+
+  return html;
 }
 
 interface AssistantInfo {
@@ -136,45 +183,117 @@ export default function ChatPage() {
     setInput("");
     setLoading(true);
 
+    const assistantId = (Date.now() + 1).toString();
+
     try {
+      // Try streaming first
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           message: userMessage.content,
-          sessionKey: "webchat-ui"
+          sessionKey: "webchat-ui",
+          stream: true,
         }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get("content-type") || "";
 
-      if (data.success && data.response) {
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: data.response,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-        showNotification(`${assistant.name} replied`, data.response);
+      if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
+        // Streaming response
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        const decoder = new TextDecoder();
+        let accumulated = "";
+
+        // Add placeholder assistant message
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantId,
+            role: "assistant",
+            content: "",
+            timestamp: new Date(),
+            streaming: true,
+          },
+        ]);
+        setLoading(false); // hide "Thinking..." since we have a streaming bubble
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          // Handle SSE format: lines starting with "data: "
+          const lines = chunk.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.token || parsed.content || parsed.text || parsed.delta?.content) {
+                  accumulated += parsed.token || parsed.content || parsed.text || parsed.delta?.content || "";
+                }
+              } catch {
+                // Not JSON, treat as raw text
+                accumulated += data;
+              }
+            } else if (line.trim() && !line.startsWith(":") && !line.startsWith("event:")) {
+              // Raw streaming text (not SSE)
+              accumulated += line;
+            }
+          }
+
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: accumulated } : m
+            )
+          );
+        }
+
+        // Mark streaming complete
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, streaming: false } : m
+          )
+        );
+        if (accumulated) {
+          showNotification(`${assistant.name} replied`, accumulated);
+        }
       } else {
-        // Show error as assistant message
-        const errorMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: `⚠️ Error: ${data.error || "Failed to get response"}`,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
+        // Non-streaming JSON response (fallback)
+        const data = await res.json();
+
+        if (data.success && data.response) {
+          const assistantMessage: Message = {
+            id: assistantId,
+            role: "assistant",
+            content: data.response,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, assistantMessage]);
+          showNotification(`${assistant.name} replied`, data.response);
+        } else {
+          const errorMessage: Message = {
+            id: assistantId,
+            role: "assistant",
+            content: `⚠️ Error: ${data.error || "Failed to get response"}`,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, errorMessage]);
+        }
+        setLoading(false);
       }
     } catch (e: any) {
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: assistantId,
         role: "assistant",
         content: `⚠️ Connection error: ${e.message}`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
+      setLoading(false);
     }
 
     setLoading(false);
@@ -274,9 +393,19 @@ export default function ChatPage() {
                         : "bg-white/10 text-gray-100"
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">
-                      {msg.content}
-                    </div>
+                    {msg.role === "assistant" ? (
+                      <div className="relative">
+                        <div
+                          className="whitespace-pre-wrap break-words prose prose-invert prose-sm max-w-none"
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                        />
+                        {msg.streaming && (
+                          <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                    )}
                     <div
                       className={`text-xs mt-1 ${
                         msg.role === "user" ? "text-blue-200" : "text-gray-500"
