@@ -1,5 +1,8 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import dynamic from "next/dynamic";
+
+const PixelOffice = dynamic(() => import("./PixelOffice"), { ssr: false });
 
 interface AgentEvent {
   type: string;
@@ -214,11 +217,31 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
         </div>
       </div>
 
-      {/* Agent Characters */}
-      <div className={`flex justify-center gap-8 py-6 px-4 border-b ${border}`}>
-        {Object.values(agents).map((agent) => (
-          <AgentCharacter key={agent.id} agent={agent} isDark={isDark} />
-        ))}
+      {/* Pixel Art Office */}
+      <div className={`px-4 py-3 border-b ${border}`}>
+        <PixelOffice
+          activity={{
+            boss: agents.boss.status === "thinking" ? (currentRound === 0 ? "planning" : "diagnosing")
+              : agents.boss.status === "reviewing" ? "reviewing"
+              : agents.boss.status === "done" && events.some(e => e.content?.includes("APPROVED")) ? "approved"
+              : agents.boss.status === "done" ? "feedback"
+              : "idle",
+            worker: agents.worker.status === "coding" ? (currentRound <= 1 ? "coding" : "fixing")
+              : agents.worker.status === "done" ? "done"
+              : "idle",
+            tester: agents.tester.status === "running" ? "running"
+              : agents.tester.status === "done" ? "passed"
+              : agents.tester.status === "error" ? "failed"
+              : "idle",
+          }}
+          round={currentRound}
+          isDark={isDark}
+          thought={
+            Object.values(agents).find(a => a.thought)
+              ? { agent: Object.values(agents).find(a => a.thought)!.id, text: Object.values(agents).find(a => a.thought)!.thought! }
+              : null
+          }
+        />
       </div>
 
       {/* Main Content */}
