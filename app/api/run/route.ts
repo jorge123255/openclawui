@@ -58,9 +58,8 @@ function detectRuntime(language: string): RuntimeInfo | null {
     rs:     { ext: "rs",    run: (f) => `rustc -o "${f}.out" "${f}" && "${f}.out"`,            cleanup: (f) => [`${f}.out`] },
     swift:  { ext: "swift", run: (f) => `swift "${f}"` },
     java:   { ext: "java",  run: (f) => {
-      // Java needs special handling — class name must match filename
-      // We use --source flag to skip that requirement
-      return `java --source 21 "${f}"`;
+      // Java source-file mode: --source <version> skips class-name-must-match-filename
+      return `java --source 25 "${f}"`;
     }},
     kotlin: { ext: "kts",   run: (f) => `kotlin "${f}"` },
     kt:     { ext: "kts",   run: (f) => `kotlin "${f}"` },
@@ -114,6 +113,11 @@ export async function POST(request: Request) {
           PYTHONUNBUFFERED: "1",
           // Ensure Homebrew/cargo/go paths are available
           PATH: [
+            "/usr/local/opt/openjdk/bin",
+            "/usr/local/opt/php/bin",
+            "/usr/local/opt/rust/bin",
+            "/usr/local/opt/kotlin/bin",
+            "/usr/local/opt/lua/bin",
             process.env.PATH,
             "/usr/local/bin",
             "/opt/homebrew/bin",
