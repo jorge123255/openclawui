@@ -527,10 +527,29 @@ function drawRoundBadge(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
+// ─── Position Targets ───────────────────────────────────────────────────────
+
+const POSITIONS = {
+  bossDesk: { x: 27, y: 37 },
+  bossWhiteboard: { x: 30, y: 27 },
+  bossWorkerDesk: { x: 60, y: 40 },
+  workerDesk: { x: 79, y: 40 },
+};
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * Math.min(1, t);
+}
+
 export default function PixelOffice({ activity, round, isDark, thought, statusText }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef(0);
   const animRef = useRef<number>(0);
+
+  // Smooth position tracking
+  const bossPos = useRef({ x: POSITIONS.bossDesk.x, y: POSITIONS.bossDesk.y });
+  const bossFacing = useRef<"left" | "right" | "front">("front");
+  const bossTargetRef = useRef(POSITIONS.bossDesk);
+  const prevBossActivity = useRef(activity.boss);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -582,9 +601,45 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
     }
 
     const bossIsPlanning = activity.boss === "planning";
+    const bossIsReviewing = activity.boss === "reviewing" || activity.boss === "diagnosing";
     const workerTyping = activity.worker === "coding" || activity.worker === "fixing";
     const bossActive = activity.boss !== "idle";
     const testerStatus = activity.tester;
+
+    // ── Update boss target position ──
+    if (activity.boss !== prevBossActivity.current) {
+      prevBossActivity.current = activity.boss;
+      if (bossIsPlanning) {
+        bossTargetRef.current = POSITIONS.bossWhiteboard;
+      } else if (bossIsReviewing) {
+        bossTargetRef.current = POSITIONS.bossWorkerDesk;
+      } else {
+        bossTargetRef.current = POSITIONS.bossDesk;
+      }
+    }
+
+    // ── Smooth movement ──
+    const speed = 0.06; // movement speed per frame
+    const target = bossTargetRef.current;
+    const bp = bossPos.current;
+    const dx = target.x - bp.x;
+    const dy = target.y - bp.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (dist > 0.5) {
+      bp.x = lerp(bp.x, target.x, speed);
+      bp.y = lerp(bp.y, target.y, speed);
+      // Face direction of movement
+      bossFacing.current = dx > 1 ? "right" : dx < -1 ? "left" : "front";
+    } else {
+      bp.x = target.x;
+      bp.y = target.y;
+      bossFacing.current = bossIsPlanning ? "right" : "front";
+    }
+
+    const bossIsWalking = dist > 1;
+    const bossAtWhiteboard = !bossIsWalking && bossIsPlanning;
+    const bossAtWorkerDesk = !bossIsWalking && bossIsReviewing;
 
     // ── Wall objects (back to front) ──
 
@@ -660,11 +715,25 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
     // Boss chair
     drawChair(ctx, 26, 42, s);
 
-    // Boss character
-    if (bossIsPlanning) {
-      drawBossStanding(ctx, 30, 27, s, f);
+    // Boss character — smooth position
+    if (bossIsWalking || bossAtWhiteboard || bossAtWorkerDesk) {
+      // Standing/walking sprite — add walk bob
+      const walkBob = bossIsWalking ? Math.sin(frameRef.current * 0.3) * 0.5 : 0;
+      drawBossStanding(ctx, Math.round(bp.x), Math.round(bp.y + walkBob), s, f);
+      // Walking dust particles
+      if (bossIsWalking && frameRef.current % 8 < 3) {
+        ctx.fillStyle = "rgba(200,180,255,0.2)";
+        ctx.fillRect((bp.x + 3) * s, (bp.y + 11) * s, 2 * s, s);
+      }
     } else {
-      drawBossSitting(ctx, 27, 37, s, f);
+      drawBossSitting(ctx, Math.round(bp.x), Math.round(bp.y), s, f);
+    }
+
+    // Boss interaction: if at worker's desk, draw review indicator
+    if (bossAtWorkerDesk) {
+      // Magnifying glass / review indicator
+      ctx.fillStyle = "rgba(167,139,250,0.15)";
+      ctx.fillRect(75 * s, 39 * s, 12 * s, 6 * s); // purple glow on worker's monitors
     }
 
     // === BREAK AREA (center, x ~52-68) ===
@@ -791,9 +860,11 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
 
     if (thought) {
       if (thought.agent === "boss") {
-        drawBubble(ctx, bossIsPlanning ? 34 : 32, bossIsPlanning ? 23 : 33, thought.text, s);
+        drawBubble(ctx, Math.round(bp.x + 4), Math.round(bp.y - 5), thought.text, s);
       } else if (thought.agent === "worker") {
         drawBubble(ctx, 84, 36, thought.text, s);
+      } else if (thought.agent === "tester") {
+        drawBubble(ctx, 67, 2, thought.text, s);
       }
     }
 

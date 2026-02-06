@@ -23,32 +23,48 @@ function sendEvent(controller: ReadableStreamDefaultController, event: AgentEven
   controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
 }
 
-async function callModel(model: string, messages: { role: string; content: string }[]): Promise<string> {
-  const payload = JSON.stringify({
-    model,
-    messages,
-    stream: false,
-    max_tokens: 16000,
+function callModel(model: string, messages: { role: string; content: string }[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify({
+      model,
+      messages,
+      stream: false,
+      max_tokens: 16000,
+    });
+
+    const tmpFile = `/tmp/multi-agent-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+    require("fs").writeFileSync(tmpFile, payload);
+
+    const { spawn } = require("child_process");
+    const curl = spawn("curl", [
+      "-s", "-X", "POST",
+      `${GATEWAY_URL}/v1/chat/completions`,
+      "-H", "Content-Type: application/json",
+      "-H", `Authorization: Bearer ${GATEWAY_TOKEN}`,
+      "-d", `@${tmpFile}`,
+    ]);
+
+    let stdout = "";
+    let stderr = "";
+    curl.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+    curl.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+    const timeout = setTimeout(() => {
+      curl.kill();
+      reject(new Error("Model call timed out after 120s"));
+    }, 120000);
+
+    curl.on("close", (code: number) => {
+      clearTimeout(timeout);
+      try { require("fs").unlinkSync(tmpFile); } catch {}
+      try {
+        const parsed = JSON.parse(stdout);
+        resolve(parsed.choices?.[0]?.message?.content || "");
+      } catch {
+        reject(new Error(`Failed to parse response: ${stdout.slice(0, 200)}`));
+      }
+    });
   });
-
-  // Write payload to temp file to avoid shell escaping issues
-  const tmpFile = `/tmp/multi-agent-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
-  require("fs").writeFileSync(tmpFile, payload);
-
-  try {
-    const result = execSync(
-      `curl -s -X POST "${GATEWAY_URL}/v1/chat/completions" ` +
-      `-H "Content-Type: application/json" ` +
-      `-H "Authorization: Bearer ${GATEWAY_TOKEN}" ` +
-      `-d @${tmpFile}`,
-      { timeout: 120000, maxBuffer: 10 * 1024 * 1024 }
-    ).toString();
-
-    const parsed = JSON.parse(result);
-    return parsed.choices?.[0]?.message?.content || "";
-  } finally {
-    try { require("fs").unlinkSync(tmpFile); } catch {}
-  }
 }
 
 function extractCodeBlock(text: string, label?: string): string {
@@ -90,8 +106,8 @@ function runTests(code: string, tests: string, language: string): { passed: numb
       // Write code + tests together
       const combined = `${code}\n\n${tests}`;
       require("fs").writeFileSync(`${tmpDir}/test_main.py`, combined);
-      // Try pytest first, fall back to plain python (no install needed)
-      cmd = `cd ${tmpDir} && (/usr/bin/python3 -m pytest test_main.py -v 2>&1 || /usr/bin/python3 test_main.py 2>&1)`;
+      // Auto-install pytest if needed, then run
+      cmd = `cd ${tmpDir} && /usr/bin/python3 -m pip install --user --break-system-packages pytest -q 2>/dev/null; /usr/bin/python3 -m pytest test_main.py -v --tb=short 2>&1 || /usr/bin/python3 test_main.py 2>&1`;
     } else if (language === "javascript" || language === "js" || language === "typescript" || language === "ts") {
       require("fs").writeFileSync(`${tmpDir}/code.js`, code);
       require("fs").writeFileSync(`${tmpDir}/test.js`, `const code = require('./code');\n${tests}`);
