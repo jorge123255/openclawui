@@ -539,7 +539,8 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
 
     const W = canvas.width;
     const H = canvas.height;
-    const s = Math.max(2, Math.floor(Math.min(W / 130, H / 68)));
+    // Scale to fill full width - scene is 160px wide
+    const s = Math.max(2, W / 160);
 
     ctx.imageSmoothingEnabled = false;
     frameRef.current++;
@@ -547,29 +548,36 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
 
     // ── Background ──
     // Ceiling
-    rect(ctx, 0, 0, 140, 3, s, C.ceiling);
-    // Ceiling lights
-    for (let lx = 20; lx < 140; lx += 35) {
-      rect(ctx, lx, 2, 8, 1, s, "#555");
-      rect(ctx, lx+1, 3, 6, 0.5, s, `rgba(255,255,220,0.15)`);
+    rect(ctx, 0, 0, 160, 3, s, C.ceiling);
+    // Ceiling lights with glow
+    for (let lx = 15; lx < 160; lx += 30) {
+      rect(ctx, lx, 1.5, 10, 1.5, s, "#555");
+      rect(ctx, lx+1, 3, 8, 0.5, s, "#666");
+      // Light glow cone
+      ctx.fillStyle = "rgba(255,255,200,0.04)";
+      ctx.beginPath();
+      ctx.moveTo((lx+2)*s, 3*s);
+      ctx.lineTo((lx-3)*s, 40*s);
+      ctx.lineTo((lx+13)*s, 40*s);
+      ctx.lineTo((lx+8)*s, 3*s);
+      ctx.fill();
     }
 
     // Wall
-    for (let wx = 0; wx < 140; wx += 10) {
+    for (let wx = 0; wx < 160; wx += 10) {
       rect(ctx, wx, 3, 10, 37, s, wx % 20 < 10 ? C.wall1 : C.wall2);
     }
-    // Wall texture
-    for (let wx = 0; wx < 140; wx += 20) {
+    // Wall texture lines
+    for (let wx = 0; wx < 160; wx += 20) {
       rect(ctx, wx+5, 3, 0.3, 37, s, C.wall3);
     }
     // Baseboard
-    rect(ctx, 0, 39, 140, 1.5, s, C.baseboard);
+    rect(ctx, 0, 39, 160, 1.5, s, C.baseboard);
 
     // Floor tiles
-    for (let fx = 0; fx < 140; fx += 8) {
-      rect(ctx, fx, 40, 8, 35, s, fx % 16 < 8 ? C.floor1 : C.floor2);
-      // Tile edge
-      rect(ctx, fx, 40, 0.3, 35, s, C.floor3);
+    for (let fx = 0; fx < 160; fx += 8) {
+      rect(ctx, fx, 40, 8, 32, s, fx % 16 < 8 ? C.floor1 : C.floor2);
+      rect(ctx, fx, 40, 0.3, 32, s, C.floor3);
     }
 
     const bossIsPlanning = activity.boss === "planning";
@@ -580,134 +588,211 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
     // ── Wall objects (back to front) ──
 
     // Window (far left)
-    drawWindow(ctx, 2, 5, s, f);
+    drawWindow(ctx, 3, 5, s, f);
 
     // Whiteboard (left-center)
-    drawWhiteboard(ctx, 18, 6, s, bossIsPlanning || activity.boss === "reviewing" || activity.boss === "diagnosing", f);
+    drawWhiteboard(ctx, 22, 6, s, bossIsPlanning || activity.boss === "reviewing" || activity.boss === "diagnosing", f);
 
     // Clock
-    drawClock(ctx, 44, 6, s, f);
+    drawClock(ctx, 48, 6, s, f);
 
-    // Test screen (center-right)
-    drawTestWall(ctx, 55, 5, s, testerStatus, f);
+    // Test screen (center)
+    drawTestWall(ctx, 60, 5, s, testerStatus, f);
 
-    // Some wall art / poster
-    rect(ctx, 78, 8, 8, 10, s, "#333"); // frame
-    rect(ctx, 79, 9, 6, 8, s, "#1a1a2a"); // dark poster
-    rect(ctx, 80, 10, 4, 1, s, "#60a0ff"); // text line
-    rect(ctx, 80, 12, 3, 1, s, "#a78bfa"); // text line
-    rect(ctx, 80, 14, 2, 1, s, "#60a0ff"); // text line
+    // Motivational poster
+    rect(ctx, 82, 7, 10, 12, s, "#333");
+    rect(ctx, 83, 8, 8, 10, s, "#1a1a2a");
+    rect(ctx, 84, 9, 6, 4, s, "#2a2050"); // image area
+    px(ctx, 86, 10, s, "#f0d060"); px(ctx, 87, 10, s, "#f0d060"); // star
+    px(ctx, 86, 11, s, "#f0d060"); px(ctx, 87, 11, s, "#f0d060");
+    rect(ctx, 84, 14, 5, 0.5, s, "#60a0ff");
+    rect(ctx, 84, 15.5, 4, 0.5, s, "#a78bfa");
+
+    // Bookshelf (right wall)
+    rect(ctx, 118, 8, 14, 2, s, "#6b5035"); // top shelf
+    rect(ctx, 118, 14, 14, 2, s, "#6b5035"); // mid shelf
+    rect(ctx, 118, 20, 14, 2, s, "#6b5035"); // bottom shelf
+    rect(ctx, 117, 7, 1, 16, s, "#5a4028"); // left side
+    rect(ctx, 132, 7, 1, 16, s, "#5a4028"); // right side
+    // Books
+    rect(ctx, 119, 10, 2, 4, s, "#d04040"); rect(ctx, 121, 10.5, 1.5, 3.5, s, "#4060d0");
+    rect(ctx, 123, 10, 2, 4, s, "#40a060"); rect(ctx, 125, 10.5, 1.5, 3.5, s, "#e0a020");
+    rect(ctx, 127, 10, 2, 4, s, "#8040c0"); rect(ctx, 129, 10.5, 1, 3.5, s, "#d08040");
+    // Bottom shelf books
+    rect(ctx, 119, 16, 2.5, 4, s, "#3050a0"); rect(ctx, 122, 16.5, 2, 3.5, s, "#a04040");
+    rect(ctx, 125, 16, 2.5, 4, s, "#40a0a0"); rect(ctx, 128, 16.5, 2, 3.5, s, "#c06080");
+
+    // Second window (far right)
+    drawWindow(ctx, 140, 5, s, f);
 
     // ── Furniture ──
 
-    // Boss desk (left area) — big L-shaped
-    rect(ctx, 18, 44, 20, 1, s, C.deskTop);
-    rect(ctx, 18, 43, 20, 1, s, C.deskSide);
-    rect(ctx, 18, 45, 20, 3, s, C.deskFront);
-    rect(ctx, 19, 48, 1, 3, s, C.deskLeg);
-    rect(ctx, 36, 48, 1, 3, s, C.deskLeg);
-    // Drawer lines
-    rect(ctx, 19, 46, 8, 0.3, s, C.deskLeg);
-    rect(ctx, 29, 46, 8, 0.3, s, C.deskLeg);
+    // === BOSS AREA (left side, x ~20-50) ===
+    // Boss desk — large
+    rect(ctx, 20, 44, 22, 1, s, C.deskTop);
+    rect(ctx, 20, 43, 22, 1, s, C.deskSide);
+    rect(ctx, 20, 45, 22, 3, s, C.deskFront);
+    rect(ctx, 21, 48, 1, 3, s, C.deskLeg);
+    rect(ctx, 40, 48, 1, 3, s, C.deskLeg);
+    rect(ctx, 21, 46, 9, 0.3, s, C.deskLeg);
+    rect(ctx, 32, 46, 9, 0.3, s, C.deskLeg);
+    // Drawer handle
+    rect(ctx, 25, 46.5, 1.5, 0.3, s, C.deskTop);
+    rect(ctx, 36, 46.5, 1.5, 0.3, s, C.deskTop);
 
-    // Boss monitors (dual)
-    drawDualMonitor(ctx, 21, 36, s,
+    // Boss dual monitors
+    drawDualMonitor(ctx, 23, 36, s,
       activity.boss === "approved" ? C.codeGreen :
       activity.boss === "feedback" ? C.codeOrange :
       bossActive ? C.codeGreen : "#444",
       bossActive ? 4 : 0, f);
 
     // Coffee on boss desk
-    drawCoffeeMug(ctx, 37, 41, s, f);
-
-    // Papers on desk
-    rect(ctx, 34, 43, 3, 2, s, C.paper);
-    rect(ctx, 34.5, 43.5, 1.5, 0.3, s, C.paperLine);
-    rect(ctx, 34.5, 44.2, 2, 0.3, s, C.paperLine);
+    drawCoffeeMug(ctx, 39, 41, s, f);
+    // Papers
+    rect(ctx, 36, 43, 3, 2, s, C.paper);
+    rect(ctx, 36.5, 43.5, 1.5, 0.3, s, C.paperLine);
+    rect(ctx, 36.5, 44.2, 2, 0.3, s, C.paperLine);
+    // Pen
+    rect(ctx, 35, 42.5, 0.3, 2, s, "#3050a0");
 
     // Boss chair
-    drawChair(ctx, 24, 42, s);
+    drawChair(ctx, 26, 42, s);
 
     // Boss character
     if (bossIsPlanning) {
-      drawBossStanding(ctx, 26, 28, s, f);
+      drawBossStanding(ctx, 30, 27, s, f);
     } else {
-      drawBossSitting(ctx, 25, 37, s, f);
+      drawBossSitting(ctx, 27, 37, s, f);
     }
 
-    // Worker desk (right area)
-    rect(ctx, 62, 47, 18, 1, s, C.deskTop);
-    rect(ctx, 62, 46, 18, 1, s, C.deskSide);
-    rect(ctx, 62, 48, 18, 3, s, C.deskFront);
-    rect(ctx, 63, 51, 1, 3, s, C.deskLeg);
-    rect(ctx, 78, 51, 1, 3, s, C.deskLeg);
-    // Drawer
-    rect(ctx, 63, 49, 7, 0.3, s, C.deskLeg);
+    // === BREAK AREA (center, x ~52-68) ===
+    // Water cooler
+    drawWaterCooler(ctx, 55, 44, s, f);
 
-    // Worker monitor (single big)
-    drawSingleMonitor(ctx, 66, 39, s,
+    // Filing cabinet
+    rect(ctx, 60, 42, 6, 9, s, "#4a4a5a");
+    rect(ctx, 60.5, 42.5, 5, 3.5, s, "#555568");
+    rect(ctx, 60.5, 46.5, 5, 3.5, s, "#555568");
+    rect(ctx, 62, 44, 2, 0.4, s, "#777"); // handle
+    rect(ctx, 62, 48, 2, 0.4, s, "#777"); // handle
+
+    // Trash can
+    rect(ctx, 52, 48, 3, 3, s, "#555");
+    rect(ctx, 52, 47.5, 3, 0.8, s, "#666");
+    // Crumpled paper in trash
+    px(ctx, 53, 48.5, s, C.paper);
+
+    // === WORKER AREA (right-center, x ~70-100) ===
+    // Worker desk
+    rect(ctx, 72, 47, 20, 1, s, C.deskTop);
+    rect(ctx, 72, 46, 20, 1, s, C.deskSide);
+    rect(ctx, 72, 48, 20, 3, s, C.deskFront);
+    rect(ctx, 73, 51, 1, 3, s, C.deskLeg);
+    rect(ctx, 90, 51, 1, 3, s, C.deskLeg);
+    rect(ctx, 73, 49, 8, 0.3, s, C.deskLeg);
+    rect(ctx, 83, 49, 8, 0.3, s, C.deskLeg);
+    rect(ctx, 77, 49.5, 1.5, 0.3, s, C.deskTop);
+
+    // Worker dual monitors too (he's a dev, needs screens!)
+    drawDualMonitor(ctx, 75, 39, s,
       activity.worker === "done" ? C.codeGreen :
       workerTyping ? C.codeBlue : "#444",
       workerTyping ? 4 : (activity.worker === "done" ? 2 : 0), f);
 
-    // Worker's coffee
-    drawCoffeeMug(ctx, 76, 44, s, f);
-
-    // Energy drink can
-    rect(ctx, 74, 44, 2, 3, s, "#30a060");
-    rect(ctx, 74, 44, 2, 1, s, "#40c080");
+    // Energy drink
+    rect(ctx, 88, 44, 2, 3, s, "#30a060");
+    rect(ctx, 88, 44, 2, 1, s, "#40c080");
+    // Worker coffee
+    drawCoffeeMug(ctx, 85, 44, s, f);
+    // Rubber duck
+    px(ctx, 90, 45, s, "#f0d040"); px(ctx, 91, 45, s, "#f0d040");
+    px(ctx, 90, 44.5, s, "#f0d040"); px(ctx, 91, 44, s, "#f09020"); // beak
 
     // Worker chair
-    drawChair(ctx, 67, 45, s);
+    drawChair(ctx, 78, 45, s);
 
     // Worker character
-    drawWorkerSitting(ctx, 68, 40, s, f, workerTyping);
+    drawWorkerSitting(ctx, 79, 40, s, f, workerTyping);
 
-    // ── Side objects ──
+    // === FAR RIGHT AREA (x ~100-155) ===
 
-    // Server rack (far right)
-    drawServerRack(ctx, 100, 24, s, f, testerStatus === "running" || workerTyping);
+    // Server rack
+    drawServerRack(ctx, 110, 24, s, f, testerStatus === "running" || workerTyping);
+    // Cable from server
+    rect(ctx, 113, 42, 0.4, 10, s, C.cable);
+    rect(ctx, 113, 52, 5, 0.4, s, C.cable);
 
-    // Water cooler (between areas)
-    drawWaterCooler(ctx, 50, 44, s, f);
+    // Plant (large)
+    drawPlant(ctx, 105, 44, s, f);
 
-    // Plant (near server)
-    drawPlant(ctx, 96, 44, s, f);
+    // Standing desk / side table (far right)
+    rect(ctx, 135, 38, 10, 1, s, C.deskTop);
+    rect(ctx, 135, 39, 10, 2, s, C.deskFront);
+    rect(ctx, 136, 41, 1, 6, s, C.deskLeg);
+    rect(ctx, 143, 41, 1, 6, s, C.deskLeg);
+    // Laptop on it
+    rect(ctx, 137, 36, 6, 2, s, "#333");
+    rect(ctx, 137.5, 36.5, 5, 1, s, "#111");
+    // Laptop screen glow
+    if (workerTyping || bossActive) {
+      rect(ctx, 138, 36.7, 4, 0.5, s, C.codeDim);
+    }
 
-    // Cable from server to floor
-    rect(ctx, 103, 42, 0.4, 8, s, C.cable);
+    // Couch / bean bag (break area right)
+    rect(ctx, 148, 50, 8, 4, s, "#504080");
+    rect(ctx, 147, 48, 2, 6, s, "#453070"); // arm
+    rect(ctx, 148, 48, 8, 2, s, "#5a4890"); // back
+    rect(ctx, 156, 48, 2, 6, s, "#453070"); // arm
+    // Pillow
+    rect(ctx, 150, 49, 3, 2, s, "#f0a040");
+
+    // Small table next to couch
+    rect(ctx, 146, 52, 3, 0.5, s, C.deskTop);
+    rect(ctx, 146.5, 52.5, 0.8, 2, s, C.deskLeg);
+    // Plant on it
+    rect(ctx, 146.5, 51, 2, 1.5, s, C.leaf2);
+    rect(ctx, 147, 52, 1, 0.5, s, C.plantPot);
+
+    // ── Monitor glow on faces (ambient lighting) ──
+    if (bossActive && !bossIsPlanning) {
+      ctx.fillStyle = "rgba(80,224,144,0.06)";
+      ctx.fillRect(25*s, 36*s, 12*s, 8*s);
+    }
+    if (workerTyping) {
+      ctx.fillStyle = "rgba(96,160,255,0.06)";
+      ctx.fillRect(77*s, 39*s, 12*s, 8*s);
+    }
 
     // ── Labels ──
     ctx.textAlign = "center";
 
-    // Boss label
     ctx.font = `bold ${2.8 * s}px monospace`;
     ctx.fillStyle = "#a78bfa";
-    ctx.fillText("OPUS (BOSS)", 28 * s, 58 * s);
+    ctx.fillText("OPUS (BOSS)", 32 * s, 58 * s);
     if (bossActive) {
       ctx.font = `${2 * s}px monospace`;
       ctx.fillStyle = "#c0b0e0";
-      ctx.fillText(activity.boss.toUpperCase(), 28 * s, 61 * s);
+      ctx.fillText(activity.boss.toUpperCase(), 32 * s, 61 * s);
     }
 
-    // Worker label
     ctx.font = `bold ${2.8 * s}px monospace`;
     ctx.fillStyle = "#60a5fa";
-    ctx.fillText("CODEX (WORKER)", 72 * s, 60 * s);
+    ctx.fillText("CODEX (WORKER)", 84 * s, 60 * s);
     if (activity.worker !== "idle") {
       ctx.font = `${2 * s}px monospace`;
       ctx.fillStyle = "#90c0f0";
-      ctx.fillText(activity.worker.toUpperCase(), 72 * s, 63 * s);
+      ctx.fillText(activity.worker.toUpperCase(), 84 * s, 63 * s);
     }
 
     // ── Overlays ──
-    if (round > 0) drawRoundBadge(ctx, 115, 8, round, s);
+    if (round > 0) drawRoundBadge(ctx, 130, 8, round, s);
 
     if (thought) {
       if (thought.agent === "boss") {
-        drawBubble(ctx, bossIsPlanning ? 30 : 28, bossIsPlanning ? 24 : 33, thought.text, s);
+        drawBubble(ctx, bossIsPlanning ? 34 : 32, bossIsPlanning ? 23 : 33, thought.text, s);
       } else if (thought.agent === "worker") {
-        drawBubble(ctx, 72, 36, thought.text, s);
+        drawBubble(ctx, 84, 36, thought.text, s);
       }
     }
 
@@ -722,12 +807,14 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
       const container = canvas.parentElement;
       if (!container) return;
       const w = container.clientWidth;
-      const h = Math.min(w * 0.5, 420);
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+      const pixW = w * dpr;
+      const ps = pixW / 160; // pixel size
+      const pixH = ps * 72;  // scene is 72 pixels tall
+      canvas.width = pixW;
+      canvas.height = pixH;
       canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
+      canvas.style.height = `${pixH / dpr}px`;
     };
 
     resize();
