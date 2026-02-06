@@ -601,6 +601,9 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // Command approval state
+  const [commandResults, setCommandResults] = useState<Record<string, { output: string; code: number; status: 'running' | 'done' | 'denied' }>>({});
+
   // Theme state
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
@@ -979,6 +982,32 @@ export default function ChatPage() {
     setTimeout(() => setCopied(null), 2000);
   }
 
+  // Command approval helpers
+  async function runApprovedCommand(commandId: string, command: string) {
+    setCommandResults(prev => ({ ...prev, [commandId]: { output: '', code: 0, status: 'running' } }));
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: command, language: 'bash' }),
+      });
+      const data = await res.json();
+      setCommandResults(prev => ({
+        ...prev,
+        [commandId]: { output: data.output || data.error || '', code: data.exitCode || 0, status: 'done' }
+      }));
+    } catch (e: any) {
+      setCommandResults(prev => ({
+        ...prev,
+        [commandId]: { output: e.message, code: 1, status: 'done' }
+      }));
+    }
+  }
+
+  function denyCommand(commandId: string) {
+    setCommandResults(prev => ({ ...prev, [commandId]: { output: '', code: 0, status: 'denied' } }));
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1249,10 +1278,86 @@ export default function ChatPage() {
                   >
                     {msg.role === "assistant" ? (
                       <div className="relative">
-                        {parseMessageContent(msg.content).map((segment, i) =>
-                          segment.type === "code" ? (
+                        {parseMessageContent(msg.content).map((segment, segIdx) => {
+                          // Check if this is a shell command that needs approval
+                          const isShellCommand = segment.type === "code" && ['bash', 'sh', 'shell', 'zsh', 'terminal'].includes(segment.language?.toLowerCase() || '');
+                          const commandId = `${msg.id}-${segIdx}`;
+                          const cmdResult = commandResults[commandId];
+
+                          if (isShellCommand) {
+                            return (
+                              <div key={segIdx} className={`my-2 rounded-lg border ${
+                                cmdResult?.status === 'denied'
+                                  ? 'border-red-500/20 bg-red-500/5'
+                                  : cmdResult?.status === 'done'
+                                  ? 'border-green-500/20 bg-green-500/5'
+                                  : 'border-yellow-500/30 bg-yellow-500/5'
+                              } overflow-hidden`}>
+                                {/* Command header */}
+                                <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                                  <div className="flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+                                    </svg>
+                                    <span className="text-xs font-medium text-gray-400">Terminal Command</span>
+                                  </div>
+                                  {!cmdResult && (
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => runApprovedCommand(commandId, segment.content)}
+                                        className="flex items-center gap-1 px-2.5 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded-md transition-colors"
+                                      >
+                                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                                        Run
+                                      </button>
+                                      <button
+                                        onClick={() => denyCommand(commandId)}
+                                        className="flex items-center gap-1 px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 text-xs rounded-md transition-colors"
+                                      >
+                                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                                        Deny
+                                      </button>
+                                    </div>
+                                  )}
+                                  {cmdResult?.status === 'running' && (
+                                    <div className="flex items-center gap-1.5 text-xs text-yellow-400">
+                                      <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
+                                      Running...
+                                    </div>
+                                  )}
+                                  {cmdResult?.status === 'done' && (
+                                    <span className={`text-xs ${cmdResult.code === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                      {cmdResult.code === 0 ? '✓ Completed' : `✗ Exit code ${cmdResult.code}`}
+                                    </span>
+                                  )}
+                                  {cmdResult?.status === 'denied' && (
+                                    <span className="text-xs text-red-400">✗ Denied</span>
+                                  )}
+                                </div>
+
+                                {/* Command content */}
+                                <pre className={`px-3 py-2 text-sm font-mono overflow-x-auto ${
+                                  cmdResult?.status === 'denied' ? 'opacity-50 line-through' : 'text-gray-200'
+                                }`}>
+                                  <code>{segment.content}</code>
+                                </pre>
+
+                                {/* Output */}
+                                {cmdResult?.status === 'done' && cmdResult.output && (
+                                  <div className="border-t border-white/10">
+                                    <div className="px-3 py-1 text-[10px] text-gray-500 uppercase tracking-wide">Output</div>
+                                    <pre className="px-3 py-2 text-xs font-mono text-gray-400 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
+                                      {cmdResult.output}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return segment.type === "code" ? (
                             <CodeBlock
-                              key={i}
+                              key={segIdx}
                               code={segment.content}
                               language={segment.language || "code"}
                               onPreviewHtml={setHtmlPreview}
@@ -1260,7 +1365,7 @@ export default function ChatPage() {
                             />
                           ) : (
                             <div
-                              key={i}
+                              key={segIdx}
                               className="whitespace-pre-wrap break-words"
                               dangerouslySetInnerHTML={{
                                 __html: isDark
@@ -1268,8 +1373,8 @@ export default function ChatPage() {
                                   : renderMarkdownTextLight(segment.content),
                               }}
                             />
-                          ),
-                        )}
+                          );
+                        })}
                         {msg.streaming && (
                           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
                         )}
