@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useCallback } from "react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -16,335 +16,512 @@ interface Props {
   thought?: { agent: string; text: string } | null;
 }
 
-// ─── Color Palette ──────────────────────────────────────────────────────────
+// ─── Pixel Helpers ──────────────────────────────────────────────────────────
 
-const PAL = {
-  // Office
-  floor: "#3b3253",
-  floorLight: "#4a4068",
-  wall: "#2a2040",
-  wallAccent: "#352a50",
-  desk: "#8b6b4a",
-  deskDark: "#6b4f35",
-  deskLight: "#a88860",
-  // Characters
-  bossHair: "#f5d670",
-  bossSuit: "#5b4fa0",
-  bossSuitLight: "#7b6fc0",
-  bossShirt: "#e8e0f0",
-  bossSkin: "#fad0a0",
-  workerHair: "#4a3520",
-  workerHoodie: "#4080d0",
-  workerHoodieLight: "#60a0e8",
-  workerSkin: "#e8b888",
-  // Objects
-  monitor: "#1a1a2e",
-  monitorGlow: "#40d080",
-  monitorCode: "#60e8a0",
-  monitorError: "#e05050",
-  whiteboard: "#e8e4e0",
-  whiteboardFrame: "#888078",
-  coffee: "#6b4030",
-  coffeeLight: "#8b6050",
-  steam: "rgba(255,255,255,0.3)",
-  // UI
-  bubbleBg: "#ffffff",
-  bubbleText: "#222222",
-  testGreen: "#40d080",
-  testRed: "#e05050",
-  testYellow: "#e8c840",
-  serverLed: "#40d080",
-  serverLedOff: "#303030",
+const px = (ctx: CanvasRenderingContext2D, x: number, y: number, s: number, c: string) => {
+  ctx.fillStyle = c;
+  ctx.fillRect(x * s, y * s, s, s);
 };
 
-// ─── Pixel Drawing Helpers ──────────────────────────────────────────────────
+const rect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, s: number, c: string) => {
+  ctx.fillStyle = c;
+  ctx.fillRect(x * s, y * s, w * s, h * s);
+};
 
-function drawPixel(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, color: string) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.floor(x * size), Math.floor(y * size), size, size);
-}
+// Draw from a sprite map: array of [x, y, color] relative to origin
+const sprite = (ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, pixels: [number, number, string][]) => {
+  for (const [dx, dy, c] of pixels) {
+    ctx.fillStyle = c;
+    ctx.fillRect((ox + dx) * s, (oy + dy) * s, s, s);
+  }
+};
 
-function drawRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, size: number, color: string) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.floor(x * size), Math.floor(y * size), w * size, h * size);
-}
+// ─── Color Palette ──────────────────────────────────────────────────────────
 
-// ─── Sprite Definitions ─────────────────────────────────────────────────────
+const C = {
+  wall1: "#2d2245", wall2: "#332850", wall3: "#28203e",
+  floor1: "#3d3060", floor2: "#453868", floor3: "#352858",
+  baseboard: "#4a3a6a",
+  ceiling: "#222040",
 
-function drawBoss(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, frame: number, facing: "left" | "right" | "front" = "front") {
+  // Furniture
+  deskTop: "#b8956a", deskFront: "#8b6b45", deskSide: "#9a7a52", deskLeg: "#6b5035",
+  chairBack: "#444", chairSeat: "#555", chairLeg: "#3a3a3a", chairWheel: "#333",
+  
+  // Boss character (12px tall)
+  bHair: "#f0d060", bHairDk: "#d0b040", bSkin: "#f5c898", bSkinSh: "#d8a870",
+  bEye: "#2a2a4a", bMouth: "#c08060",
+  bShirt: "#e8e0f0", bTie: "#d04040",
+  bSuit: "#5544a0", bSuitLt: "#7060b8", bSuitDk: "#443088",
+  bShoe: "#2a2a3a", bPant: "#443880",
+  
+  // Worker character
+  wHair: "#3a2515", wHairDk: "#2a1808", wSkin: "#e8b080", wSkinSh: "#c89060",
+  wEye: "#1a1a3a",
+  wHoodie: "#3872c0", wHoodieLt: "#5090e0", wHoodieDk: "#2858a0", wHoodieStr: "#60a8f0",
+  wPant: "#384868", wShoe: "#555",
+  wPhone: "#333", wPhoneBand: "#555",
+
+  // Monitors
+  monBez: "#2a2a38", monScreen: "#0a0a18", monStand: "#444", monBase: "#555",
+  codeGreen: "#50e090", codeBright: "#80ffc0", codeBlue: "#60a0ff", codeDim: "#308060",
+  codeOrange: "#f0a040",
+  errRed: "#ff4040", errDim: "#802020",
+
+  // Objects
+  wbFrame: "#888078", wbSurface: "#f0ece8", wbMarkerR: "#e04040", wbMarkerB: "#4060e0", wbMarkerG: "#40a060",
+  mugBrown: "#7b5030", mugRim: "#9b7050", steam: "rgba(255,255,255,0.25)",
+  plantPot: "#8b5e3c", plantPotRim: "#a07050", leaf1: "#3a8838", leaf2: "#50a848", leaf3: "#68c060",
+  
+  // Server
+  srvBody: "#252535", srvInner: "#1a1a28", srvLed: "#40e080", srvLedWarn: "#e0c040", srvLedOff: "#2a2a2a",
+  
+  // Test screen
+  testPass: "#40e080", testFail: "#ff4444", testWarn: "#e8c840", testBg: "#111118",
+  
+  // Window
+  winFrame: "#5a5070", winGlass: "#2a3050", winSky: "#1a2848", winStar: "#f0e8c0",
+  
+  // Misc
+  clock: "#ddd", clockFace: "#fff", clockHand: "#333",
+  postIt1: "#fff740", postIt2: "#ff7eb3", postIt3: "#7afcff",
+  paper: "#e8e4e0", paperLine: "#c0b8b0",
+  cable: "#333",
+  bubbleBg: "#fff", bubbleBorder: "#ccc", bubbleText: "#222",
+  badge: "#a78bfa", badgeText: "#fff",
+};
+
+// ─── Boss Sprite (sitting, 8w x 13h) ───────────────────────────────────────
+
+function drawBossSitting(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, f: number) {
   // Hair
-  drawRect(ctx, x + 1, y, 4, 1, s, PAL.bossHair);
-  drawRect(ctx, x, y + 1, 6, 1, s, PAL.bossHair);
+  sprite(ctx, ox, oy, s, [
+    [2,0,C.bHair],[3,0,C.bHair],[4,0,C.bHair],[5,0,C.bHair],
+    [1,1,C.bHair],[2,1,C.bHairDk],[3,1,C.bHair],[4,1,C.bHair],[5,1,C.bHairDk],[6,1,C.bHair],
+  ]);
   // Face
-  drawRect(ctx, x + 1, y + 2, 4, 2, s, PAL.bossSkin);
-  // Eyes
-  if (facing === "front") {
-    drawPixel(ctx, x + 2, y + 2, s, "#333");
-    drawPixel(ctx, x + 4, y + 2, s, "#333");
-  } else {
-    const ex = facing === "right" ? 1 : 0;
-    drawPixel(ctx, x + 2 + ex, y + 2, s, "#333");
-    drawPixel(ctx, x + 4 + ex, y + 2, s, "#333");
+  sprite(ctx, ox, oy, s, [
+    [2,2,C.bSkin],[3,2,C.bSkin],[4,2,C.bSkin],[5,2,C.bSkin],
+    [1,2,C.bSkinSh],[6,2,C.bSkinSh],
+    [2,3,C.bSkin],[3,3,C.bSkin],[4,3,C.bSkin],[5,3,C.bSkin],
+  ]);
+  // Eyes (blink every 16 frames)
+  if (f % 16 < 14) {
+    px(ctx, ox+2, oy+2, s, C.bEye); px(ctx, ox+5, oy+2, s, C.bEye);
   }
-  // Mouth - varies with frame
-  if (frame % 4 < 2) {
-    drawPixel(ctx, x + 3, y + 3, s, "#c08070");
-  }
-  // Shirt collar
-  drawRect(ctx, x + 2, y + 4, 2, 1, s, PAL.bossShirt);
-  // Suit
-  drawRect(ctx, x, y + 4, 2, 3, s, PAL.bossSuit);
-  drawRect(ctx, x + 4, y + 4, 2, 3, s, PAL.bossSuit);
-  drawRect(ctx, x + 2, y + 5, 2, 2, s, PAL.bossSuitLight);
-  // Arms - typing animation
-  if (frame % 2 === 0) {
-    drawPixel(ctx, x - 1, y + 5, s, PAL.bossSkin);
-    drawPixel(ctx, x + 6, y + 6, s, PAL.bossSkin);
-  } else {
-    drawPixel(ctx, x - 1, y + 6, s, PAL.bossSkin);
-    drawPixel(ctx, x + 6, y + 5, s, PAL.bossSkin);
-  }
-  // Legs
-  drawPixel(ctx, x + 1, y + 7, s, PAL.bossSuit);
-  drawPixel(ctx, x + 4, y + 7, s, PAL.bossSuit);
+  // Mouth (talks when active)
+  if (f % 6 < 3) px(ctx, ox+3, oy+3, s, C.bMouth);
+  // Shirt + Tie
+  sprite(ctx, ox, oy, s, [
+    [3,4,C.bShirt],[4,4,C.bShirt],
+    [3,5,C.bTie],[4,5,C.bShirt],
+  ]);
+  // Suit jacket
+  sprite(ctx, ox, oy, s, [
+    [1,4,C.bSuit],[2,4,C.bSuitLt],[5,4,C.bSuitLt],[6,4,C.bSuit],
+    [1,5,C.bSuit],[2,5,C.bSuitLt],[5,5,C.bSuitLt],[6,5,C.bSuit],
+    [1,6,C.bSuitDk],[2,6,C.bSuit],[3,6,C.bSuit],[4,6,C.bSuit],[5,6,C.bSuit],[6,6,C.bSuitDk],
+  ]);
+  // Arms typing
+  const armOff = f % 4 < 2 ? 0 : 1;
+  px(ctx, ox+0, oy+5+armOff, s, C.bSkin);
+  px(ctx, ox+7, oy+5+(1-armOff), s, C.bSkin);
+  // Pants
+  sprite(ctx, ox, oy, s, [
+    [2,7,C.bPant],[3,7,C.bPant],[4,7,C.bPant],[5,7,C.bPant],
+  ]);
   // Shoes
-  drawPixel(ctx, x + 1, y + 8, s, "#333");
-  drawPixel(ctx, x + 4, y + 8, s, "#333");
+  px(ctx, ox+2, oy+8, s, C.bShoe); px(ctx, ox+5, oy+8, s, C.bShoe);
 }
 
-function drawWorker(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, frame: number, isTyping: boolean) {
+function drawBossStanding(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, f: number) {
+  // Same top half
+  sprite(ctx, ox, oy, s, [
+    [2,0,C.bHair],[3,0,C.bHair],[4,0,C.bHair],[5,0,C.bHair],
+    [1,1,C.bHair],[2,1,C.bHairDk],[3,1,C.bHair],[4,1,C.bHair],[5,1,C.bHairDk],[6,1,C.bHair],
+    [2,2,C.bSkin],[3,2,C.bSkin],[4,2,C.bSkin],[5,2,C.bSkin],
+    [1,2,C.bSkinSh],[6,2,C.bSkinSh],
+    [2,3,C.bSkin],[3,3,C.bSkin],[4,3,C.bSkin],[5,3,C.bSkin],
+  ]);
+  if (f % 16 < 14) { px(ctx, ox+3, oy+2, s, C.bEye); px(ctx, ox+5, oy+2, s, C.bEye); } // facing right
+  if (f % 6 < 3) px(ctx, ox+4, oy+3, s, C.bMouth);
+  // Shirt + suit
+  sprite(ctx, ox, oy, s, [
+    [3,4,C.bShirt],[4,4,C.bShirt],[3,5,C.bTie],[4,5,C.bShirt],
+    [1,4,C.bSuit],[2,4,C.bSuitLt],[5,4,C.bSuitLt],[6,4,C.bSuit],
+    [1,5,C.bSuit],[2,5,C.bSuitLt],[5,5,C.bSuitLt],[6,5,C.bSuit],
+    [1,6,C.bSuitDk],[2,6,C.bSuit],[3,6,C.bSuit],[4,6,C.bSuit],[5,6,C.bSuit],[6,6,C.bSuitDk],
+  ]);
+  // Arm raised (pointing at whiteboard)
+  px(ctx, ox+7, oy+3, s, C.bSkin); px(ctx, ox+8, oy+2, s, C.bSkin);
+  px(ctx, ox+0, oy+5, s, C.bSkin);
+  // Pants (standing — taller)
+  sprite(ctx, ox, oy, s, [
+    [2,7,C.bPant],[3,7,C.bPant],[4,7,C.bPant],[5,7,C.bPant],
+    [2,8,C.bPant],[3,8,C.bPant],[4,8,C.bPant],[5,8,C.bPant],
+    [2,9,C.bPant],[5,9,C.bPant],
+  ]);
+  // Shoes
+  px(ctx, ox+1, oy+10, s, C.bShoe); px(ctx, ox+2, oy+10, s, C.bShoe);
+  px(ctx, ox+5, oy+10, s, C.bShoe); px(ctx, ox+6, oy+10, s, C.bShoe);
+}
+
+// ─── Worker Sprite (sitting, 8w x 10h) ─────────────────────────────────────
+
+function drawWorkerSitting(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, f: number, typing: boolean) {
+  // Headphone band
+  sprite(ctx, ox, oy, s, [[1,-1,C.wPhoneBand],[2,-1,C.wPhoneBand],[3,-1,C.wPhoneBand],[4,-1,C.wPhoneBand],[5,-1,C.wPhoneBand],[6,-1,C.wPhoneBand]]);
+  // Headphone cups
+  px(ctx, ox+0, oy+0, s, C.wPhone); px(ctx, ox+7, oy+0, s, C.wPhone);
   // Hair
-  drawRect(ctx, x + 1, y, 4, 2, s, PAL.workerHair);
-  drawPixel(ctx, x, y + 1, s, PAL.workerHair);
-  // Headphones
-  drawPixel(ctx, x, y, s, "#555");
-  drawPixel(ctx, x + 5, y, s, "#555");
-  drawRect(ctx, x + 1, y - 1, 4, 1, s, "#555");
+  sprite(ctx, ox, oy, s, [
+    [2,0,C.wHair],[3,0,C.wHair],[4,0,C.wHair],[5,0,C.wHair],
+    [1,0,C.wHairDk],[6,0,C.wHairDk],
+    [1,1,C.wHair],[2,1,C.wHairDk],[5,1,C.wHairDk],[6,1,C.wHair],
+  ]);
   // Face
-  drawRect(ctx, x + 1, y + 2, 4, 2, s, PAL.workerSkin);
-  // Eyes - blink occasionally
-  if (frame % 12 < 10) {
-    drawPixel(ctx, x + 2, y + 2, s, "#333");
-    drawPixel(ctx, x + 4, y + 2, s, "#333");
-  }
+  sprite(ctx, ox, oy, s, [
+    [2,1,C.wSkin],[3,1,C.wSkin],[4,1,C.wSkin],[5,1,C.wSkin],
+    [2,2,C.wSkin],[3,2,C.wSkin],[4,2,C.wSkin],[5,2,C.wSkin],
+  ]);
+  // Eyes (occasional blink)
+  if (f % 20 < 18) { px(ctx, ox+3, oy+1, s, C.wEye); px(ctx, ox+5, oy+1, s, C.wEye); }
   // Hoodie
-  drawRect(ctx, x, y + 4, 6, 3, s, PAL.workerHoodie);
-  drawRect(ctx, x + 2, y + 4, 2, 1, s, PAL.workerHoodieLight);
-  // Arms - typing animation
-  if (isTyping) {
-    if (frame % 3 === 0) {
-      drawPixel(ctx, x - 1, y + 5, s, PAL.workerSkin);
-      drawPixel(ctx, x + 6, y + 6, s, PAL.workerSkin);
-    } else if (frame % 3 === 1) {
-      drawPixel(ctx, x - 1, y + 6, s, PAL.workerSkin);
-      drawPixel(ctx, x + 6, y + 5, s, PAL.workerSkin);
-    } else {
-      drawPixel(ctx, x - 1, y + 5, s, PAL.workerSkin);
-      drawPixel(ctx, x + 6, y + 5, s, PAL.workerSkin);
-    }
+  sprite(ctx, ox, oy, s, [
+    [1,3,C.wHoodie],[2,3,C.wHoodieLt],[3,3,C.wHoodieStr],[4,3,C.wHoodieStr],[5,3,C.wHoodieLt],[6,3,C.wHoodie],
+    [1,4,C.wHoodieDk],[2,4,C.wHoodie],[3,4,C.wHoodieLt],[4,4,C.wHoodieLt],[5,4,C.wHoodie],[6,4,C.wHoodieDk],
+    [1,5,C.wHoodieDk],[2,5,C.wHoodie],[3,5,C.wHoodie],[4,5,C.wHoodie],[5,5,C.wHoodie],[6,5,C.wHoodieDk],
+  ]);
+  // Arms typing
+  if (typing) {
+    const a = f % 3;
+    px(ctx, ox+0, oy+4+(a===0?0:1), s, C.wSkin);
+    px(ctx, ox+7, oy+4+(a===1?0:1), s, C.wSkin);
   } else {
-    drawPixel(ctx, x - 1, y + 6, s, PAL.workerSkin);
-    drawPixel(ctx, x + 6, y + 6, s, PAL.workerSkin);
+    px(ctx, ox+0, oy+5, s, C.wSkin); px(ctx, ox+7, oy+5, s, C.wSkin);
   }
+  // Pants + shoes
+  sprite(ctx, ox, oy, s, [
+    [2,6,C.wPant],[3,6,C.wPant],[4,6,C.wPant],[5,6,C.wPant],
+  ]);
+  px(ctx, ox+2, oy+7, s, C.wShoe); px(ctx, ox+5, oy+7, s, C.wShoe);
+}
+
+// ─── Office Objects ─────────────────────────────────────────────────────────
+
+function drawDeskBig(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  // Desktop surface with edge highlight
+  rect(ctx, x, y, 18, 1, s, C.deskTop);
+  rect(ctx, x, y-1, 18, 1, s, C.deskSide);
+  // Front panel
+  rect(ctx, x, y+1, 18, 3, s, C.deskFront);
+  // Drawer lines
+  rect(ctx, x+1, y+1.5, 7, 0.3, s, C.deskLeg);
+  rect(ctx, x+10, y+1.5, 7, 0.3, s, C.deskLeg);
+  // Drawer handles
+  px(ctx, x+4, oy2(y,2), s, C.deskTop); px(ctx, x+13, oy2(y,2), s, C.deskTop);
   // Legs
-  drawPixel(ctx, x + 1, y + 7, s, "#3050a0");
-  drawPixel(ctx, x + 4, y + 7, s, "#3050a0");
-  // Shoes
-  drawPixel(ctx, x + 1, y + 8, s, "#666");
-  drawPixel(ctx, x + 4, y + 8, s, "#666");
+  rect(ctx, x+1, y+4, 1, 4, s, C.deskLeg);
+  rect(ctx, x+16, y+4, 1, 4, s, C.deskLeg);
+}
+
+function oy2(y: number, off: number) { return y + off; } // helper
+
+function drawDualMonitor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, glow: string, lines: number, f: number) {
+  // Left monitor
+  rect(ctx, x, y, 8, 6, s, C.monBez);
+  rect(ctx, x+0.5, y+0.5, 7, 5, s, C.monScreen);
+  // Right monitor  
+  rect(ctx, x+9, y, 8, 6, s, C.monBez);
+  rect(ctx, x+9.5, y+0.5, 7, 5, s, C.monScreen);
+  // Stands
+  rect(ctx, x+3, y+6, 2, 1, s, C.monStand);
+  rect(ctx, x+2, y+7, 4, 0.5, s, C.monBase);
+  rect(ctx, x+12, y+6, 2, 1, s, C.monStand);
+  rect(ctx, x+11, y+7, 4, 0.5, s, C.monBase);
+  
+  // Screen content
+  if (lines > 0) {
+    for (let i = 0; i < Math.min(lines, 4); i++) {
+      const w = 2 + ((f + i * 7) % 4);
+      const col = i % 2 === 0 ? glow : (glow === C.codeGreen ? C.codeDim : C.codeBlue);
+      rect(ctx, x+1, y+1+i*1.2, w, 0.6, s, col);
+      // Right monitor — different content
+      const w2 = 3 + ((f + i * 5) % 3);
+      rect(ctx, x+10, y+1+i*1.2, w2, 0.6, s, col);
+    }
+    // Cursor blink on left monitor
+    if (f % 4 < 2) {
+      px(ctx, x+1+(f%5), y+1+Math.min(lines-1,3)*1.2, s, C.codeBright);
+    }
+  }
+}
+
+function drawSingleMonitor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, glow: string, lines: number, f: number) {
+  rect(ctx, x, y, 8, 6, s, C.monBez);
+  rect(ctx, x+0.5, y+0.5, 7, 5, s, C.monScreen);
+  rect(ctx, x+3, y+6, 2, 1, s, C.monStand);
+  rect(ctx, x+2, y+7, 4, 0.5, s, C.monBase);
+  if (lines > 0) {
+    for (let i = 0; i < Math.min(lines, 4); i++) {
+      const w = 2 + ((f + i * 3) % 4);
+      rect(ctx, x+1, y+1+i*1.2, w, 0.6, s, glow);
+    }
+    if (f % 4 < 2) px(ctx, x+1+(f%4), y+1+Math.min(lines-1,3)*1.2, s, C.codeBright);
+  }
 }
 
 function drawChair(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
-  // Back
-  drawRect(ctx, x, y, 1, 5, s, "#444");
-  drawRect(ctx, x + 1, y, 5, 1, s, "#555");
+  // Back rest
+  rect(ctx, x, y, 7, 1, s, C.chairBack);
+  rect(ctx, x, y+1, 1, 4, s, C.chairBack);
+  rect(ctx, x+6, y+1, 1, 4, s, C.chairBack);
   // Seat
-  drawRect(ctx, x, y + 5, 6, 1, s, "#555");
-  // Legs
-  drawPixel(ctx, x, y + 6, s, "#444");
-  drawPixel(ctx, x + 5, y + 6, s, "#444");
-  // Wheels
-  drawPixel(ctx, x - 1, y + 7, s, "#333");
-  drawPixel(ctx, x + 6, y + 7, s, "#333");
+  rect(ctx, x, y+5, 7, 1, s, C.chairSeat);
+  // Center pole
+  rect(ctx, x+3, y+6, 1, 2, s, C.chairLeg);
+  // Star base
+  sprite(ctx, x, oy2(y, 8), s, [[0,0,C.chairWheel],[3,0,C.chairLeg],[6,0,C.chairWheel]]);
 }
 
-function drawDesk(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, s: number) {
-  // Desktop surface
-  drawRect(ctx, x, y, w, 2, s, PAL.desk);
-  drawRect(ctx, x, y, w, 1, s, PAL.deskLight);
-  // Front panel
-  drawRect(ctx, x, y + 2, w, 3, s, PAL.deskDark);
-  // Legs
-  drawRect(ctx, x + 1, y + 5, 1, 3, s, PAL.deskDark);
-  drawRect(ctx, x + w - 2, y + 5, 1, 3, s, PAL.deskDark);
-}
-
-function drawMonitor(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, color: string, lines: number, frame: number) {
-  // Monitor body
-  drawRect(ctx, x, y, 8, 6, s, "#333");
-  drawRect(ctx, x + 1, y + 1, 6, 4, s, PAL.monitor);
-  // Screen glow
-  drawRect(ctx, x + 1, y + 1, 6, 4, s, color + "15");
-  // Code lines
-  for (let i = 0; i < Math.min(lines, 3); i++) {
-    const lineW = 2 + ((frame + i * 3) % 3);
-    drawRect(ctx, x + 2, y + 1.5 + i, lineW, 0.7, s, color);
-  }
-  // Stand
-  drawRect(ctx, x + 3, y + 6, 2, 1, s, "#555");
-  drawRect(ctx, x + 2, y + 7, 4, 0.5, s, "#555");
-}
-
-function drawWhiteboard(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, hasContent: boolean, frame: number) {
+function drawWhiteboard(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, hasContent: boolean, f: number) {
   // Frame
-  drawRect(ctx, x, y, 16, 10, s, PAL.whiteboardFrame);
-  drawRect(ctx, x + 0.5, y + 0.5, 15, 9, s, PAL.whiteboard);
-  // Content
+  rect(ctx, x, y, 20, 12, s, C.wbFrame);
+  rect(ctx, x+1, y+1, 18, 10, s, C.wbSurface);
+  
   if (hasContent) {
-    // Diagram lines
-    drawRect(ctx, x + 2, y + 2, 4, 0.5, s, "#4060d0");
-    drawRect(ctx, x + 8, y + 2, 5, 0.5, s, "#d04040");
-    drawRect(ctx, x + 2, y + 4, 6, 0.5, s, "#40a060");
-    drawRect(ctx, x + 3, y + 6, 3, 0.5, s, "#a040a0");
-    drawRect(ctx, x + 8, y + 5, 4, 0.5, s, "#4060d0");
-    // Arrow
-    drawPixel(ctx, x + 6, y + 3, s, "#333");
-    drawPixel(ctx, x + 7, y + 3, s, "#333");
+    // Architecture diagram
+    // Boxes
+    rect(ctx, x+2, y+2, 5, 2, s, "#4060d0");
+    rect(ctx, x+9, y+2, 5, 2, s, "#d06040");
+    rect(ctx, x+5, y+6, 6, 2, s, "#40a060");
+    // Arrows
+    rect(ctx, x+7, y+3, 2, 0.4, s, "#555");
+    rect(ctx, x+6, y+4, 0.4, 2, s, "#555");
+    rect(ctx, x+10, y+4, 0.4, 2, s, "#555");
+    // Labels
+    rect(ctx, x+3, y+2.5, 3, 0.4, s, "#fff");
+    rect(ctx, x+10, y+2.5, 3, 0.4, s, "#fff");
+    rect(ctx, x+6, y+6.5, 4, 0.4, s, "#fff");
+    // Animated: new line being drawn
+    if (f % 8 < 4) {
+      rect(ctx, x+15, y+3+(f%3), 2, 0.4, s, C.wbMarkerR);
+    }
   }
+  
   // Marker tray
-  drawRect(ctx, x + 2, y + 10, 12, 0.5, s, "#666");
-  // Markers
-  drawRect(ctx, x + 3, y + 10, 1.5, 0.4, s, "#d04040");
-  drawRect(ctx, x + 5, y + 10, 1.5, 0.4, s, "#4060d0");
-  drawRect(ctx, x + 7, y + 10, 1.5, 0.4, s, "#40a060");
+  rect(ctx, x+3, y+12, 14, 0.8, s, "#777");
+  rect(ctx, x+4, y+12, 2, 0.6, s, C.wbMarkerR);
+  rect(ctx, x+7, y+12, 2, 0.6, s, C.wbMarkerB);
+  rect(ctx, x+10, y+12, 2, 0.6, s, C.wbMarkerG);
+  // Post-its on frame
+  rect(ctx, x+17, y+1, 2, 2, s, C.postIt1);
+  rect(ctx, x+17, y+3.5, 2, 2, s, C.postIt2);
 }
 
-function drawCoffeeMug(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, frame: number) {
-  drawRect(ctx, x, y, 3, 3, s, PAL.coffee);
-  drawRect(ctx, x, y, 3, 1, s, PAL.coffeeLight);
-  drawPixel(ctx, x + 3, y + 1, s, PAL.coffee);
-  // Steam
-  if (frame % 8 < 4) {
-    drawPixel(ctx, x + 1, y - 1, s, PAL.steam);
-  }
-  if (frame % 8 >= 4) {
-    drawPixel(ctx, x + 2, y - 1, s, PAL.steam);
-    drawPixel(ctx, x + 1, y - 2, s, PAL.steam);
-  }
-}
-
-function drawServerRack(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, frame: number, isRunning: boolean) {
-  // Rack body
-  drawRect(ctx, x, y, 6, 14, s, "#2a2a3a");
-  drawRect(ctx, x + 0.5, y + 0.5, 5, 13, s, "#1a1a2a");
-  // Server slots
-  for (let i = 0; i < 4; i++) {
-    drawRect(ctx, x + 1, y + 1 + i * 3, 4, 2, s, "#252535");
-    // LED lights
-    const ledOn = isRunning && ((frame + i * 2) % 6 < 4);
-    drawPixel(ctx, x + 1.5, y + 1.5 + i * 3, s, ledOn ? PAL.serverLed : PAL.serverLedOff);
-    drawPixel(ctx, x + 2.5, y + 1.5 + i * 3, s, isRunning ? PAL.testYellow : PAL.serverLedOff);
-  }
-}
-
-function drawTestScreen(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, status: "idle" | "running" | "passed" | "failed", frame: number) {
-  // TV mounted on wall
-  drawRect(ctx, x, y, 12, 8, s, "#333");
-  drawRect(ctx, x + 0.5, y + 0.5, 11, 7, s, "#111");
-  // Mount
-  drawRect(ctx, x + 5, y + 8, 2, 1, s, "#555");
+function drawTestWall(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, status: string, f: number) {
+  // Large wall-mounted screen
+  rect(ctx, x, y, 14, 9, s, "#333");
+  rect(ctx, x+1, y+1, 12, 7, s, C.testBg);
+  // Wall mount
+  rect(ctx, x+6, y+9, 2, 1, s, "#555");
+  
+  const label = (text: string, tx: number, ty: number, color: string) => {
+    ctx.fillStyle = color;
+    ctx.font = `bold ${2.2*s}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(text, (x+tx)*s, (y+ty)*s);
+  };
 
   if (status === "idle") {
-    drawRect(ctx, x + 4, y + 3, 4, 1, s, "#333");
+    label("TESTS", 7, 5, "#444");
+    label("READY", 7, 7, "#444");
   } else if (status === "running") {
-    // Loading animation
-    const dot = frame % 4;
-    for (let i = 0; i < 3; i++) {
-      drawPixel(ctx, x + 4 + i * 2, y + 4, s, i <= dot ? PAL.testYellow : "#333");
-    }
-    drawRect(ctx, x + 2, y + 2, 3, 0.7, s, PAL.testYellow);
+    // Animated loading bar
+    const progress = (f % 10) / 10;
+    rect(ctx, x+2, y+4, 10, 1.5, s, "#222");
+    rect(ctx, x+2, y+4, 10 * progress, 1.5, s, C.testWarn);
+    label("RUNNING", 7, 3.5, C.testWarn);
+    // Spinning indicator
+    const dots = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+    label(dots[f % dots.length], 7, 7, C.testWarn);
   } else if (status === "passed") {
-    // Green checkmark
-    drawRect(ctx, x + 1, y + 1, 10, 6, s, "#0a2a0a");
-    drawPixel(ctx, x + 3, y + 4, s, PAL.testGreen);
-    drawPixel(ctx, x + 4, y + 5, s, PAL.testGreen);
-    drawPixel(ctx, x + 5, y + 4, s, PAL.testGreen);
-    drawPixel(ctx, x + 6, y + 3, s, PAL.testGreen);
-    drawPixel(ctx, x + 7, y + 2, s, PAL.testGreen);
-    // "PASS" text
-    drawRect(ctx, x + 2, y + 1.5, 3, 0.7, s, PAL.testGreen);
+    // Green glow effect
+    rect(ctx, x+1, y+1, 12, 7, s, "#0a2a0a");
+    // Big checkmark
+    sprite(ctx, x, y, s, [
+      [4,4,C.testPass],[5,5,C.testPass],[6,4,C.testPass],[7,3,C.testPass],[8,2,C.testPass],[9,1,C.testPass],
+    ]);
+    label("ALL PASS", 7, 7.5, C.testPass);
   } else if (status === "failed") {
-    // Red X
-    drawRect(ctx, x + 1, y + 1, 10, 6, s, "#2a0a0a");
-    drawPixel(ctx, x + 3, y + 2, s, PAL.testRed);
-    drawPixel(ctx, x + 7, y + 2, s, PAL.testRed);
-    drawPixel(ctx, x + 5, y + 4, s, PAL.testRed);
-    drawPixel(ctx, x + 3, y + 6, s, PAL.testRed);
-    drawPixel(ctx, x + 7, y + 6, s, PAL.testRed);
-    // "FAIL" text
-    drawRect(ctx, x + 2, y + 1.5, 3, 0.7, s, PAL.testRed);
+    // Red glow with pulse
+    const pulse = f % 4 < 2;
+    rect(ctx, x+1, y+1, 12, 7, s, pulse ? "#2a0a0a" : "#1a0505");
+    // Big X
+    sprite(ctx, x, y, s, [
+      [4,2,C.testFail],[8,2,C.testFail],
+      [5,3,C.testFail],[7,3,C.testFail],
+      [6,4,C.testFail],
+      [5,5,C.testFail],[7,5,C.testFail],
+      [4,6,C.testFail],[8,6,C.testFail],
+    ]);
+    label("FAILED", 7, 7.5, C.testFail);
   }
 }
 
-function drawPlant(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
-  // Pot
-  drawRect(ctx, x, y + 3, 4, 3, s, "#8b5e3c");
-  drawRect(ctx, x + 0.5, y + 3, 3, 0.5, s, "#a07050");
-  // Leaves
-  drawPixel(ctx, x + 2, y, s, "#3a8040");
-  drawPixel(ctx, x + 1, y + 1, s, "#4a9050");
-  drawPixel(ctx, x + 3, y + 1, s, "#4a9050");
-  drawPixel(ctx, x + 2, y + 2, s, "#3a7030");
-  drawPixel(ctx, x + 0, y + 2, s, "#4a9050");
+function drawServerRack(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, f: number, active: boolean) {
+  rect(ctx, x, y, 7, 18, s, C.srvBody);
+  rect(ctx, x+0.5, y+0.5, 6, 17, s, C.srvInner);
+  
+  for (let i = 0; i < 5; i++) {
+    rect(ctx, x+1, y+1+i*3.2, 5, 2.5, s, "#202030");
+    // Vents
+    for (let v = 0; v < 3; v++) {
+      rect(ctx, x+2+v*1.5, y+2+i*3.2, 0.8, 0.4, s, "#181828");
+    }
+    // LEDs
+    const on1 = active && ((f + i * 3) % 8 < 6);
+    const on2 = active && ((f + i * 5) % 6 < 4);
+    px(ctx, x+1.2, y+1.3+i*3.2, s, on1 ? C.srvLed : C.srvLedOff);
+    px(ctx, x+2, y+1.3+i*3.2, s, on2 ? C.srvLedWarn : C.srvLedOff);
+  }
 }
 
-function drawBubble(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, s: number) {
-  const charW = 3.5;
-  const maxChars = 20;
-  const displayText = text.length > maxChars ? text.slice(0, maxChars - 2) + ".." : text;
-  const bubbleW = Math.max(displayText.length * charW + 6, 12);
-  const bubbleH = 8;
-  const px = x * s;
-  const py = y * s;
+function drawWindow(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, f: number) {
+  // Frame
+  rect(ctx, x, y, 12, 14, s, C.winFrame);
+  rect(ctx, x+1, y+1, 10, 12, s, C.winGlass);
+  // Cross bar
+  rect(ctx, x+5.5, y+1, 1, 12, s, C.winFrame);
+  rect(ctx, x+1, y+6.5, 10, 1, s, C.winFrame);
+  // Night sky with stars
+  rect(ctx, x+1, y+1, 4.5, 5.5, s, C.winSky);
+  rect(ctx, x+6.5, y+1, 4.5, 5.5, s, C.winSky);
+  rect(ctx, x+1, y+7.5, 4.5, 5.5, s, C.winSky);
+  rect(ctx, x+6.5, y+7.5, 4.5, 5.5, s, C.winSky);
+  // Stars (twinkle)
+  if (f % 6 < 4) px(ctx, x+3, y+3, s, C.winStar);
+  if (f % 8 < 5) px(ctx, x+8, y+2, s, C.winStar);
+  if (f % 7 < 4) px(ctx, x+2, y+9, s, C.winStar);
+  if (f % 5 < 3) px(ctx, x+9, y+10, s, C.winStar);
+  if (f % 9 < 6) px(ctx, x+4, y+8, s, C.winStar);
+  // Moon
+  rect(ctx, x+8, y+4, 2, 2, s, "#e8e0c0");
+  px(ctx, x+9, y+4, s, C.winSky); // crescent
+  // Blinds
+  rect(ctx, x, y, 12, 1, s, "#665878");
+}
 
-  // Bubble background
-  ctx.fillStyle = PAL.bubbleBg;
+function drawCoffeeMug(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, f: number) {
+  rect(ctx, x, y+1, 3, 3, s, C.mugBrown);
+  rect(ctx, x, y, 3, 1, s, C.mugRim);
+  px(ctx, x+3, y+2, s, C.mugBrown); // handle
+  // Steam wisps
+  if (f % 10 < 5) { px(ctx, x+1, y-1, s, C.steam); }
+  if (f % 10 >= 3 && f % 10 < 8) { px(ctx, x+2, y-2, s, C.steam); }
+}
+
+function drawPlant(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, f: number) {
+  // Pot
+  rect(ctx, x, y+4, 5, 4, s, C.plantPot);
+  rect(ctx, x, y+4, 5, 1, s, C.plantPotRim);
+  // Leaves (sway slightly)
+  const sway = f % 12 < 6 ? 0 : 1;
+  sprite(ctx, x+sway, y, s, [
+    [2,0,C.leaf2],[3,0,C.leaf3],
+    [1,1,C.leaf1],[2,1,C.leaf2],[3,1,C.leaf2],[4,1,C.leaf3],
+    [0,2,C.leaf1],[1,2,C.leaf2],[3,2,C.leaf2],[5,2,C.leaf1],
+    [1,3,C.leaf1],[2,3,C.leaf2],[3,3,C.leaf2],[4,3,C.leaf1],
+  ]);
+}
+
+function drawClock(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, f: number) {
+  // Clock body
+  rect(ctx, x, y, 5, 5, s, C.clock);
+  rect(ctx, x+0.5, y+0.5, 4, 4, s, C.clockFace);
+  // Hour hand
+  px(ctx, x+2.5, y+1.5, s, C.clockHand);
+  px(ctx, x+2.5, y+2.5, s, C.clockHand);
+  // Minute hand (rotates)
+  if (f % 4 < 1) px(ctx, x+3.5, y+2.5, s, C.clockHand);
+  else if (f % 4 < 2) px(ctx, x+2.5, y+3.5, s, C.clockHand);
+  else if (f % 4 < 3) px(ctx, x+1.5, y+2.5, s, C.clockHand);
+  else px(ctx, x+2.5, y+1, s, C.clockHand);
+}
+
+function drawWaterCooler(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, f: number) {
+  // Bottle
+  rect(ctx, x+1, y, 3, 2, s, "#a0d8f0");
+  rect(ctx, x+1.5, y+0.5, 2, 1, s, "#c0e8ff");
+  // Body
+  rect(ctx, x, y+2, 5, 5, s, "#ddd");
+  rect(ctx, x+0.5, y+2.5, 4, 4, s, "#eee");
+  // Spout
+  px(ctx, x+1, y+4, s, "#888");
+  // Legs
+  px(ctx, x, y+7, s, "#999"); px(ctx, x+4, y+7, s, "#999");
+  // Water bubbles
+  if (f % 20 < 2) px(ctx, x+2, y+1, s, "#fff");
+}
+
+// ─── Thought Bubble ─────────────────────────────────────────────────────────
+
+function drawBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string, s: number) {
+  const maxLen = 22;
+  const display = text.length > maxLen ? text.slice(0, maxLen - 1) + "…" : text;
+  ctx.font = `${2.5 * s}px monospace`;
+  const measured = ctx.measureText(display);
+  const bw = measured.width + 8 * s;
+  const bh = 7 * s;
+  const bx = cx * s - bw / 2;
+  const by = cy * s - bh;
+
+  // Shadow
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
-  ctx.roundRect(px - bubbleW * s / 2, py - bubbleH * s, bubbleW * s, bubbleH * s, 3 * s);
+  ctx.roundRect(bx + s, by + s, bw, bh, 4 * s);
   ctx.fill();
 
-  // Border
-  ctx.strokeStyle = "#ccc";
-  ctx.lineWidth = 1;
+  // Bubble
+  ctx.fillStyle = C.bubbleBg;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 4 * s);
+  ctx.fill();
+  ctx.strokeStyle = C.bubbleBorder;
+  ctx.lineWidth = 0.8;
   ctx.stroke();
 
-  // Tail
-  ctx.fillStyle = PAL.bubbleBg;
+  // Tail dots
+  ctx.fillStyle = C.bubbleBg;
   ctx.beginPath();
-  ctx.moveTo(px - 2 * s, py);
-  ctx.lineTo(px, py + 2 * s);
-  ctx.lineTo(px + 2 * s, py);
+  ctx.arc(cx * s, (cy + 1) * s, 2 * s, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx * s + 1.5 * s, (cy + 2.5) * s, 1.2 * s, 0, Math.PI * 2);
   ctx.fill();
 
   // Text
-  ctx.fillStyle = PAL.bubbleText;
-  ctx.font = `${3 * s}px monospace`;
+  ctx.fillStyle = C.bubbleText;
   ctx.textAlign = "center";
-  ctx.fillText(displayText, px, py - 3 * s);
+  ctx.textBaseline = "middle";
+  ctx.fillText(display, cx * s, by + bh / 2);
 }
 
-function drawRoundBadge(ctx: CanvasRenderingContext2D, x: number, y: number, round: number, s: number) {
-  const px = x * s;
-  const py = y * s;
-  ctx.fillStyle = "#a78bfa";
-  ctx.beginPath();
-  ctx.arc(px, py, 4 * s, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#fff";
+function drawRoundBadge(ctx: CanvasRenderingContext2D, cx: number, cy: number, round: number, s: number) {
+  const pxX = cx * s;
+  const pxY = cy * s;
+  // Glow
+  ctx.fillStyle = "rgba(167,139,250,0.3)";
+  ctx.beginPath(); ctx.arc(pxX, pxY, 6 * s, 0, Math.PI * 2); ctx.fill();
+  // Circle
+  ctx.fillStyle = C.badge;
+  ctx.beginPath(); ctx.arc(pxX, pxY, 4.5 * s, 0, Math.PI * 2); ctx.fill();
+  // Text
+  ctx.fillStyle = C.badgeText;
   ctx.font = `bold ${3.5 * s}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`R${round}`, px, py + 0.5 * s);
+  ctx.fillText(`R${round}`, pxX, pxY + 0.5 * s);
 }
 
 // ─── Main Component ─────────────────────────────────────────────────────────
@@ -362,120 +539,176 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
 
     const W = canvas.width;
     const H = canvas.height;
-    const s = Math.floor(Math.min(W / 120, H / 70)); // pixel size — fit both dimensions
+    const s = Math.max(2, Math.floor(Math.min(W / 130, H / 68)));
 
     ctx.imageSmoothingEnabled = false;
     frameRef.current++;
-    const f = Math.floor(frameRef.current / 6); // slow down animations
+    const f = Math.floor(frameRef.current / 8); // animation speed
 
-    // Clear
-    ctx.fillStyle = PAL.wall;
-    ctx.fillRect(0, 0, W, H);
-
-    // Wall pattern
-    for (let wx = 0; wx < 120; wx += 8) {
-      drawRect(ctx, wx, 0, 8, 35, s, wx % 16 < 8 ? PAL.wall : PAL.wallAccent);
+    // ── Background ──
+    // Ceiling
+    rect(ctx, 0, 0, 140, 3, s, C.ceiling);
+    // Ceiling lights
+    for (let lx = 20; lx < 140; lx += 35) {
+      rect(ctx, lx, 2, 8, 1, s, "#555");
+      rect(ctx, lx+1, 3, 6, 0.5, s, `rgba(255,255,220,0.15)`);
     }
 
-    // Floor
-    drawRect(ctx, 0, 35, 120, 35, s, PAL.floor);
-    for (let fx = 0; fx < 120; fx += 6) {
-      drawRect(ctx, fx, 35, 6, 35, s, fx % 12 < 6 ? PAL.floor : PAL.floorLight);
+    // Wall
+    for (let wx = 0; wx < 140; wx += 10) {
+      rect(ctx, wx, 3, 10, 37, s, wx % 20 < 10 ? C.wall1 : C.wall2);
+    }
+    // Wall texture
+    for (let wx = 0; wx < 140; wx += 20) {
+      rect(ctx, wx+5, 3, 0.3, 37, s, C.wall3);
     }
     // Baseboard
-    drawRect(ctx, 0, 35, 120, 1, s, "#4a3a60");
+    rect(ctx, 0, 39, 140, 1.5, s, C.baseboard);
 
-    // ── Background objects ──
+    // Floor tiles
+    for (let fx = 0; fx < 140; fx += 8) {
+      rect(ctx, fx, 40, 8, 35, s, fx % 16 < 8 ? C.floor1 : C.floor2);
+      // Tile edge
+      rect(ctx, fx, 40, 0.3, 35, s, C.floor3);
+    }
 
-    // Whiteboard (wall, left side)
-    const bossPlanning = activity.boss === "planning";
-    drawWhiteboard(ctx, 5, 5, s, bossPlanning || activity.boss === "reviewing", f);
+    const bossIsPlanning = activity.boss === "planning";
+    const workerTyping = activity.worker === "coding" || activity.worker === "fixing";
+    const bossActive = activity.boss !== "idle";
+    const testerStatus = activity.tester;
 
-    // Test screen (wall, center-right)
-    drawTestScreen(ctx, 65, 5, s, activity.tester, f);
+    // ── Wall objects (back to front) ──
 
-    // Server rack (far right)
-    drawServerRack(ctx, 105, 20, s, f, activity.tester === "running");
+    // Window (far left)
+    drawWindow(ctx, 2, 5, s, f);
 
-    // Plant
-    drawPlant(ctx, 90, 38, s);
+    // Whiteboard (left-center)
+    drawWhiteboard(ctx, 18, 6, s, bossIsPlanning || activity.boss === "reviewing" || activity.boss === "diagnosing", f);
 
-    // ── Boss area (left) ──
-    drawDesk(ctx, 25, 40, 14, s);
-    drawMonitor(ctx, 28, 33, s,
-      activity.boss === "approved" ? PAL.testGreen :
-      activity.boss === "feedback" ? PAL.testYellow :
-      PAL.monitorGlow,
-      activity.boss !== "idle" ? 3 : 0, f);
-    drawCoffeeMug(ctx, 36, 38, s, f);
+    // Clock
+    drawClock(ctx, 44, 6, s, f);
+
+    // Test screen (center-right)
+    drawTestWall(ctx, 55, 5, s, testerStatus, f);
+
+    // Some wall art / poster
+    rect(ctx, 78, 8, 8, 10, s, "#333"); // frame
+    rect(ctx, 79, 9, 6, 8, s, "#1a1a2a"); // dark poster
+    rect(ctx, 80, 10, 4, 1, s, "#60a0ff"); // text line
+    rect(ctx, 80, 12, 3, 1, s, "#a78bfa"); // text line
+    rect(ctx, 80, 14, 2, 1, s, "#60a0ff"); // text line
+
+    // ── Furniture ──
+
+    // Boss desk (left area) — big L-shaped
+    rect(ctx, 18, 44, 20, 1, s, C.deskTop);
+    rect(ctx, 18, 43, 20, 1, s, C.deskSide);
+    rect(ctx, 18, 45, 20, 3, s, C.deskFront);
+    rect(ctx, 19, 48, 1, 3, s, C.deskLeg);
+    rect(ctx, 36, 48, 1, 3, s, C.deskLeg);
+    // Drawer lines
+    rect(ctx, 19, 46, 8, 0.3, s, C.deskLeg);
+    rect(ctx, 29, 46, 8, 0.3, s, C.deskLeg);
+
+    // Boss monitors (dual)
+    drawDualMonitor(ctx, 21, 36, s,
+      activity.boss === "approved" ? C.codeGreen :
+      activity.boss === "feedback" ? C.codeOrange :
+      bossActive ? C.codeGreen : "#444",
+      bossActive ? 4 : 0, f);
+
+    // Coffee on boss desk
+    drawCoffeeMug(ctx, 37, 41, s, f);
+
+    // Papers on desk
+    rect(ctx, 34, 43, 3, 2, s, C.paper);
+    rect(ctx, 34.5, 43.5, 1.5, 0.3, s, C.paperLine);
+    rect(ctx, 34.5, 44.2, 2, 0.3, s, C.paperLine);
+
+    // Boss chair
+    drawChair(ctx, 24, 42, s);
 
     // Boss character
-    if (bossPlanning) {
-      // Standing at whiteboard
-      drawBoss(ctx, 12, 26, s, f, "right");
+    if (bossIsPlanning) {
+      drawBossStanding(ctx, 26, 28, s, f);
     } else {
-      // Sitting at desk
-      drawChair(ctx, 27, 37, s);
-      drawBoss(ctx, 28, 33, s, f, "front");
+      drawBossSitting(ctx, 25, 37, s, f);
     }
 
-    // ── Worker area (right) ──
-    drawDesk(ctx, 55, 43, 14, s);
-    const workerIsTyping = activity.worker === "coding" || activity.worker === "fixing";
-    drawMonitor(ctx, 58, 36, s,
-      activity.worker === "done" ? PAL.testGreen :
-      workerIsTyping ? "#60a0ff" :
-      "#555555",
-      workerIsTyping ? 3 : 0, f);
+    // Worker desk (right area)
+    rect(ctx, 62, 47, 18, 1, s, C.deskTop);
+    rect(ctx, 62, 46, 18, 1, s, C.deskSide);
+    rect(ctx, 62, 48, 18, 3, s, C.deskFront);
+    rect(ctx, 63, 51, 1, 3, s, C.deskLeg);
+    rect(ctx, 78, 51, 1, 3, s, C.deskLeg);
+    // Drawer
+    rect(ctx, 63, 49, 7, 0.3, s, C.deskLeg);
+
+    // Worker monitor (single big)
+    drawSingleMonitor(ctx, 66, 39, s,
+      activity.worker === "done" ? C.codeGreen :
+      workerTyping ? C.codeBlue : "#444",
+      workerTyping ? 4 : (activity.worker === "done" ? 2 : 0), f);
+
+    // Worker's coffee
+    drawCoffeeMug(ctx, 76, 44, s, f);
+
+    // Energy drink can
+    rect(ctx, 74, 44, 2, 3, s, "#30a060");
+    rect(ctx, 74, 44, 2, 1, s, "#40c080");
+
+    // Worker chair
+    drawChair(ctx, 67, 45, s);
 
     // Worker character
-    drawChair(ctx, 57, 40, s);
-    drawWorker(ctx, 58, 36, s, f, workerIsTyping);
+    drawWorkerSitting(ctx, 68, 40, s, f, workerTyping);
 
-    // Second coffee mug for worker
-    drawCoffeeMug(ctx, 66, 41, s, f);
+    // ── Side objects ──
 
-    // ── Overlays ──
+    // Server rack (far right)
+    drawServerRack(ctx, 100, 24, s, f, testerStatus === "running" || workerTyping);
 
-    // Round badge
-    if (round > 0) {
-      drawRoundBadge(ctx, 100, 8, round, s);
-    }
+    // Water cooler (between areas)
+    drawWaterCooler(ctx, 50, 44, s, f);
 
-    // Thought bubbles
-    if (thought) {
-      if (thought.agent === "boss") {
-        if (bossPlanning) {
-          drawBubble(ctx, 15, 22, thought.text, s);
-        } else {
-          drawBubble(ctx, 32, 29, thought.text, s);
-        }
-      } else if (thought.agent === "worker") {
-        drawBubble(ctx, 62, 32, thought.text, s);
-      }
-    }
+    // Plant (near server)
+    drawPlant(ctx, 96, 44, s, f);
 
-    // Status labels
-    ctx.font = `${2.5 * s}px monospace`;
+    // Cable from server to floor
+    rect(ctx, 103, 42, 0.4, 8, s, C.cable);
+
+    // ── Labels ──
     ctx.textAlign = "center";
 
     // Boss label
+    ctx.font = `bold ${2.8 * s}px monospace`;
     ctx.fillStyle = "#a78bfa";
-    ctx.fillText("OPUS (BOSS)", 32 * s, 55 * s);
-    if (activity.boss !== "idle") {
-      ctx.fillStyle = "#d0c0f0";
+    ctx.fillText("OPUS (BOSS)", 28 * s, 58 * s);
+    if (bossActive) {
       ctx.font = `${2 * s}px monospace`;
-      ctx.fillText(activity.boss.toUpperCase(), 32 * s, 58 * s);
+      ctx.fillStyle = "#c0b0e0";
+      ctx.fillText(activity.boss.toUpperCase(), 28 * s, 61 * s);
     }
 
     // Worker label
-    ctx.font = `${2.5 * s}px monospace`;
+    ctx.font = `bold ${2.8 * s}px monospace`;
     ctx.fillStyle = "#60a5fa";
-    ctx.fillText("CODEX (WORKER)", 62 * s, 58 * s);
+    ctx.fillText("CODEX (WORKER)", 72 * s, 60 * s);
     if (activity.worker !== "idle") {
-      ctx.fillStyle = "#a0c0f0";
       ctx.font = `${2 * s}px monospace`;
-      ctx.fillText(activity.worker.toUpperCase(), 62 * s, 61 * s);
+      ctx.fillStyle = "#90c0f0";
+      ctx.fillText(activity.worker.toUpperCase(), 72 * s, 63 * s);
+    }
+
+    // ── Overlays ──
+    if (round > 0) drawRoundBadge(ctx, 115, 8, round, s);
+
+    if (thought) {
+      if (thought.agent === "boss") {
+        drawBubble(ctx, bossIsPlanning ? 30 : 28, bossIsPlanning ? 24 : 33, thought.text, s);
+      } else if (thought.agent === "worker") {
+        drawBubble(ctx, 72, 36, thought.text, s);
+      }
     }
 
     animRef.current = requestAnimationFrame(draw);
@@ -485,29 +718,31 @@ export default function PixelOffice({ activity, round, isDark, thought }: Props)
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Set canvas size — 120x70 pixel grid, scaled up
-    const container = canvas.parentElement;
-    if (container) {
+    const resize = () => {
+      const container = canvas.parentElement;
+      if (!container) return;
       const w = container.clientWidth;
-      const h = Math.min(w * 0.58, 380);
+      const h = Math.min(w * 0.5, 420);
       const dpr = window.devicePixelRatio || 1;
       canvas.width = w * dpr;
       canvas.height = h * dpr;
       canvas.style.width = `${w}px`;
       canvas.style.height = `${h}px`;
-    }
+    };
+
+    resize();
+    window.addEventListener("resize", resize);
 
     animRef.current = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(animRef.current);
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      window.removeEventListener("resize", resize);
+    };
   }, [draw]);
 
   return (
-    <div className="w-full relative" style={{ imageRendering: "pixelated" }}>
-      <canvas
-        ref={canvasRef}
-        className="w-full rounded-lg"
-        style={{ imageRendering: "pixelated" }}
-      />
+    <div className="w-full relative overflow-hidden rounded-lg" style={{ imageRendering: "pixelated" }}>
+      <canvas ref={canvasRef} className="w-full block" style={{ imageRendering: "pixelated" }} />
     </div>
   );
 }
