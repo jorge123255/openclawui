@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   MessageSquare,
   ChevronLeft,
+  ChevronRight,
   Send,
   Loader2,
   Bot,
@@ -15,7 +16,10 @@ import {
   Check,
   Mic,
   MicOff,
+  Play,
 } from "lucide-react";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface Message {
   id: string;
@@ -25,50 +29,10 @@ interface Message {
   streaming?: boolean;
 }
 
-function renderMarkdown(text: string): string {
-  // 1. Escape HTML entities first (sanitize)
-  let html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-
-  // 2. Code blocks (``` ... ```) — must come before inline code
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, _lang, code) => {
-    return `<pre style="background:#1e1e2e;border-radius:8px;padding:12px 16px;overflow-x:auto;margin:8px 0;font-size:0.85em;line-height:1.5"><code>${code.replace(/\n$/, "")}</code></pre>`;
-  });
-
-  // 3. Inline code (`...`)
-  html = html.replace(/`([^`\n]+)`/g, '<code style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:0.9em">$1</code>');
-
-  // 4. Bold (**...**)
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-
-  // 5. Italic (*...*) — but not inside already-processed bold
-  html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
-
-  // 6. Headings (### ... , ## ... , # ...)
-  html = html.replace(/^### (.+)$/gm, '<div style="font-size:1.1em;font-weight:700;margin:12px 0 4px">$1</div>');
-  html = html.replace(/^## (.+)$/gm, '<div style="font-size:1.2em;font-weight:700;margin:14px 0 4px">$1</div>');
-  html = html.replace(/^# (.+)$/gm, '<div style="font-size:1.35em;font-weight:700;margin:16px 0 6px">$1</div>');
-
-  // 7. Unordered list items (- item or * item)
-  html = html.replace(/^[\-\*] (.+)$/gm, '<div style="padding-left:16px">• $1</div>');
-
-  // 8. Links [text](url)
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
-
-  // 9. Line breaks (preserve newlines outside of pre blocks)
-  // Split by pre blocks to avoid double-processing
-  const parts = html.split(/(<pre[\s\S]*?<\/pre>)/g);
-  html = parts
-    .map((part, i) => {
-      if (i % 2 === 1) return part; // pre block, leave alone
-      return part.replace(/\n/g, "<br>");
-    })
-    .join("");
-
-  return html;
+interface MessageSegment {
+  type: "text" | "code";
+  content: string;
+  language?: string;
 }
 
 interface AssistantInfo {
@@ -76,17 +40,225 @@ interface AssistantInfo {
   avatar: string;
 }
 
+// ─── Parsing helpers ─────────────────────────────────────────────────────────
+
+function parseMessageContent(content: string): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    // Text before the code block
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", content: content.slice(lastIndex, match.index) });
+    }
+    // The code block
+    segments.push({
+      type: "code",
+      content: match[2].replace(/\n$/, ""),
+      language: match[1] || "code",
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Remaining text after last code block
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", content: content.slice(lastIndex) });
+  }
+
+  if (segments.length === 0) {
+    segments.push({ type: "text", content });
+  }
+
+  return segments;
+}
+
+/**
+ * Render markdown text WITHOUT code-block handling (those are handled separately
+ * by <CodeBlock>). Handles: bold, italic, inline code, headings, lists, links,
+ * line breaks.
+ */
+function renderMarkdownText(text: string): string {
+  // 1. Escape HTML entities (sanitize)
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+  // 2. Inline code (`...`)
+  html = html.replace(
+    /`([^`\n]+)`/g,
+    '<code style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:0.9em">$1</code>',
+  );
+
+  // 3. Bold (**...**)
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+  // 4. Italic (*...*) — but not inside already-processed bold
+  html = html.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
+
+  // 5. Headings (### ... , ## ... , # ...)
+  html = html.replace(
+    /^### (.+)$/gm,
+    '<div style="font-size:1.1em;font-weight:700;margin:12px 0 4px">$1</div>',
+  );
+  html = html.replace(
+    /^## (.+)$/gm,
+    '<div style="font-size:1.2em;font-weight:700;margin:14px 0 4px">$1</div>',
+  );
+  html = html.replace(
+    /^# (.+)$/gm,
+    '<div style="font-size:1.35em;font-weight:700;margin:16px 0 6px">$1</div>',
+  );
+
+  // 6. Unordered list items (- item or * item)
+  html = html.replace(/^[\-\*] (.+)$/gm, '<div style="padding-left:16px">• $1</div>');
+
+  // 7. Links [text](url)
+  html = html.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>',
+  );
+
+  // 8. Line breaks
+  html = html.replace(/\n/g, "<br>");
+
+  return html;
+}
+
+// ─── CodeBlock component ─────────────────────────────────────────────────────
+
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  const [copied, setCopied] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [output, setOutput] = useState<{
+    success: boolean;
+    output: string;
+    exitCode: number;
+    elapsed: number;
+  } | null>(null);
+  const [showOutput, setShowOutput] = useState(true);
+
+  const displayLang = language || "code";
+  const canRun = [
+    "python", "py", "python3",
+    "javascript", "js", "node",
+    "typescript", "ts",
+    "bash", "sh", "shell", "zsh",
+    "ruby", "rb",
+  ].includes(displayLang.toLowerCase());
+
+  async function copyCode() {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function runCode() {
+    setRunning(true);
+    setOutput(null);
+    setShowOutput(true);
+    try {
+      const res = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, language: displayLang }),
+      });
+      const data = await res.json();
+      setOutput(data);
+    } catch (e: any) {
+      setOutput({ success: false, output: e.message, exitCode: 1, elapsed: 0 });
+    }
+    setRunning(false);
+  }
+
+  return (
+    <div className="my-3 rounded-lg overflow-hidden border border-white/10">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-white/5 border-b border-white/10">
+        <span className="text-xs font-mono text-gray-400">{displayLang}</span>
+        <div className="flex items-center gap-1">
+          {canRun && (
+            <button
+              onClick={runCode}
+              disabled={running}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-white/10 text-green-400 hover:text-green-300 disabled:opacity-50 transition-colors"
+              title="Run code"
+            >
+              {running ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Play className="w-3 h-3" />
+              )}
+              <span>{running ? "Running..." : "Run"}</span>
+            </button>
+          )}
+          <button
+            onClick={copyCode}
+            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+            title="Copy code"
+          >
+            {copied ? (
+              <Check className="w-3 h-3 text-green-400" />
+            ) : (
+              <Copy className="w-3 h-3" />
+            )}
+            <span>{copied ? "Copied!" : "Copy"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Code content */}
+      <pre className="p-3 overflow-x-auto text-sm leading-relaxed bg-[#1e1e2e]">
+        <code>{code}</code>
+      </pre>
+
+      {/* Output panel */}
+      {output && (
+        <div className="border-t border-white/10">
+          <button
+            onClick={() => setShowOutput(!showOutput)}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 transition-colors"
+          >
+            <ChevronRight
+              className={`w-3 h-3 transition-transform ${showOutput ? "rotate-90" : ""}`}
+            />
+            <span className={output.success ? "text-green-400" : "text-red-400"}>
+              {output.success ? "✓" : "✗"} Exit {output.exitCode}
+            </span>
+            <span className="text-gray-500 ml-auto">{output.elapsed}ms</span>
+          </button>
+          {showOutput && (
+            <pre className="p-3 overflow-x-auto text-xs leading-relaxed bg-black/40 text-gray-300 max-h-64 overflow-y-auto">
+              {output.output || "(no output)"}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main chat page ──────────────────────────────────────────────────────────
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const [assistant, setAssistant] = useState<AssistantInfo>({ name: "Assistant", avatar: "🤖" });
+  const [assistant, setAssistant] = useState<AssistantInfo>({
+    name: "Assistant",
+    avatar: "🤖",
+  });
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  // ── Init ────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     // Load assistant info from config
@@ -94,36 +266,40 @@ export default function ChatPage() {
       .then((res) => res.json())
       .then((data) => setAssistant(data))
       .catch(() => {});
-      
+
     // Load messages from localStorage
     const saved = localStorage.getItem("chat-messages");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setMessages(parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })));
+        setMessages(
+          parsed.map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })),
+        );
       } catch {}
     }
 
     // Check for speech recognition support
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       setSpeechSupported(true);
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = true;
       recognitionRef.current.lang = "en-US";
-      
+
       recognitionRef.current.onresult = (event: any) => {
         const transcript = Array.from(event.results)
           .map((result: any) => result[0].transcript)
           .join("");
         setInput(transcript);
       };
-      
+
       recognitionRef.current.onend = () => {
         setIsListening(false);
       };
-      
+
       recognitionRef.current.onerror = () => {
         setIsListening(false);
       };
@@ -147,9 +323,11 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
   function toggleListening() {
     if (!recognitionRef.current) return;
-    
+
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
@@ -160,7 +338,11 @@ export default function ChatPage() {
   }
 
   function showNotification(title: string, body: string) {
-    if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+    if (
+      "Notification" in window &&
+      Notification.permission === "granted" &&
+      document.hidden
+    ) {
       new Notification(title, {
         body: body.substring(0, 100),
         icon: "/icon-192.svg",
@@ -168,6 +350,8 @@ export default function ChatPage() {
       });
     }
   }
+
+  // ── Send message (with full history) ────────────────────────────────────────
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
@@ -179,7 +363,8 @@ export default function ChatPage() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput("");
     setLoading(true);
 
@@ -192,6 +377,10 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMessage.content,
+          messages: updatedMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
           sessionKey: "webchat-ui",
           stream: true,
         }),
@@ -199,7 +388,10 @@ export default function ChatPage() {
 
       const contentType = res.headers.get("content-type") || "";
 
-      if (contentType.includes("text/event-stream") || contentType.includes("text/plain")) {
+      if (
+        contentType.includes("text/event-stream") ||
+        contentType.includes("text/plain")
+      ) {
         // Streaming response
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No response body");
@@ -232,14 +424,28 @@ export default function ChatPage() {
               if (data === "[DONE]") continue;
               try {
                 const parsed = JSON.parse(data);
-                if (parsed.token || parsed.content || parsed.text || parsed.delta?.content) {
-                  accumulated += parsed.token || parsed.content || parsed.text || parsed.delta?.content || "";
+                if (
+                  parsed.token ||
+                  parsed.content ||
+                  parsed.text ||
+                  parsed.delta?.content
+                ) {
+                  accumulated +=
+                    parsed.token ||
+                    parsed.content ||
+                    parsed.text ||
+                    parsed.delta?.content ||
+                    "";
                 }
               } catch {
                 // Not JSON, treat as raw text
                 accumulated += data;
               }
-            } else if (line.trim() && !line.startsWith(":") && !line.startsWith("event:")) {
+            } else if (
+              line.trim() &&
+              !line.startsWith(":") &&
+              !line.startsWith("event:")
+            ) {
               // Raw streaming text (not SSE)
               accumulated += line;
             }
@@ -247,16 +453,16 @@ export default function ChatPage() {
 
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantId ? { ...m, content: accumulated } : m
-            )
+              m.id === assistantId ? { ...m, content: accumulated } : m,
+            ),
           );
         }
 
         // Mark streaming complete
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, streaming: false } : m
-          )
+            m.id === assistantId ? { ...m, streaming: false } : m,
+          ),
         );
         if (accumulated) {
           showNotification(`${assistant.name} replied`, accumulated);
@@ -321,8 +527,13 @@ export default function ChatPage() {
   }
 
   function formatTime(date: Date): string {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
@@ -342,7 +553,9 @@ export default function ChatPage() {
                   <MessageSquare className="w-5 h-5 text-blue-400" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-semibold">Chat with {assistant.name}</h1>
+                  <h1 className="text-lg font-semibold">
+                    Chat with {assistant.name}
+                  </h1>
                   <p className="text-xs text-gray-400">
                     {messages.length} messages
                   </p>
@@ -366,7 +579,7 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-500">
               <div className="text-5xl mb-4">{assistant.avatar}</div>
-              <p className="text-lg">Hey! I'm {assistant.name}</p>
+              <p className="text-lg">Hey! I&apos;m {assistant.name}</p>
               <p className="text-sm mt-2">Ask me anything...</p>
             </div>
           ) : (
@@ -395,16 +608,31 @@ export default function ChatPage() {
                   >
                     {msg.role === "assistant" ? (
                       <div className="relative">
-                        <div
-                          className="whitespace-pre-wrap break-words prose prose-invert prose-sm max-w-none"
-                          dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                        />
+                        {parseMessageContent(msg.content).map((segment, i) =>
+                          segment.type === "code" ? (
+                            <CodeBlock
+                              key={i}
+                              code={segment.content}
+                              language={segment.language || "code"}
+                            />
+                          ) : (
+                            <div
+                              key={i}
+                              className="whitespace-pre-wrap break-words"
+                              dangerouslySetInnerHTML={{
+                                __html: renderMarkdownText(segment.content),
+                              }}
+                            />
+                          ),
+                        )}
                         {msg.streaming && (
                           <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
                         )}
                       </div>
                     ) : (
-                      <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                      <div className="whitespace-pre-wrap break-words">
+                        {msg.content}
+                      </div>
                     )}
                     <div
                       className={`text-xs mt-1 ${
@@ -433,7 +661,7 @@ export default function ChatPage() {
               ))}
             </AnimatePresence>
           )}
-          
+
           {loading && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -451,7 +679,7 @@ export default function ChatPage() {
               </div>
             </motion.div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -470,7 +698,11 @@ export default function ChatPage() {
                 }`}
                 title={isListening ? "Stop listening" : "Voice input"}
               >
-                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                {isListening ? (
+                  <MicOff className="w-5 h-5" />
+                ) : (
+                  <Mic className="w-5 h-5" />
+                )}
               </button>
             )}
             <textarea
@@ -478,7 +710,9 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isListening ? "Listening..." : "Type a message..."}
+              placeholder={
+                isListening ? "Listening..." : "Type a message..."
+              }
               rows={1}
               className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl resize-none focus:outline-none focus:border-blue-500/50 placeholder-gray-500"
               style={{ minHeight: "48px", maxHeight: "120px" }}
@@ -497,7 +731,8 @@ export default function ChatPage() {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-2 text-center">
-            {speechSupported ? "Tap mic to speak • " : ""}Enter to send, Shift+Enter for new line
+            {speechSupported ? "Tap mic to speak • " : ""}Enter to send,
+            Shift+Enter for new line
           </p>
         </div>
       </div>
