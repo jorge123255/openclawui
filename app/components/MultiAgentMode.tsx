@@ -40,6 +40,7 @@ const AGENT_CONFIGS: Record<string, { emoji: string; color: string; title: strin
 
 export default function MultiAgentMode({ isDark, onClose }: Props) {
   const [task, setTask] = useState("");
+  const [autoStarted, setAutoStarted] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [agents, setAgents] = useState<Record<string, AgentState>>({
@@ -65,6 +66,21 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [events]);
+
+  // Auto-start if task was passed from chat
+  useEffect(() => {
+    const savedTask = sessionStorage.getItem("multiAgentTask");
+    if (savedTask && !autoStarted) {
+      sessionStorage.removeItem("multiAgentTask");
+      setTask(savedTask);
+      setAutoStarted(true);
+      // Auto-trigger build after a short delay
+      setTimeout(() => {
+        const btn = document.querySelector("[data-auto-build]") as HTMLButtonElement;
+        if (btn) btn.click();
+      }, 500);
+    }
+  }, [autoStarted]);
 
   const updateAgent = (id: string, updates: Partial<AgentState>) => {
     setAgents((prev) => ({ ...prev, [id]: { ...prev[id], ...updates } }));
@@ -216,7 +232,18 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
         setStatusText(`🔄 ROUND ${event.round}`);
         break;
       case "complete":
-        if (event.finalCode) setFinalCode(event.finalCode);
+        if (event.finalCode) {
+          setFinalCode(event.finalCode);
+          // Auto-save to /tmp
+          fetch("/api/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: `/tmp/multi-agent-output-${Date.now()}.py`,
+              content: event.finalCode,
+            }),
+          }).catch(() => {});
+        }
         if (event.tests) setFinalTests(event.tests);
         setStatusText("🎉 BUILD COMPLETE!");
         showThought("boss", "Ship it! 🚀", 10000);
@@ -406,6 +433,7 @@ export default function MultiAgentMode({ isDark, onClose }: Props) {
             <button
               onClick={startMultiAgent}
               disabled={!task.trim()}
+              data-auto-build="true"
               className="px-6 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50"
             >
               🚀 Build

@@ -1,6 +1,15 @@
 "use client";
 import { useRef, useEffect, useCallback } from "react";
 
+interface ConfettiParticle {
+  x: number;
+  y: number;
+  speed: number;
+  drift: number;
+  phase: number;
+  color: string;
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface AgentActivity {
@@ -167,9 +176,56 @@ function drawBossStanding(ctx: CanvasRenderingContext2D, ox: number, oy: number,
   px(ctx, ox+5, oy+10, s, C.bShoe); px(ctx, ox+6, oy+10, s, C.bShoe);
 }
 
+function drawBossWalking(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, f: number) {
+  const step = f % 4 < 2;
+
+  // Head + torso (reuse standing look)
+  sprite(ctx, ox, oy, s, [
+    [2,0,C.bHair],[3,0,C.bHair],[4,0,C.bHair],[5,0,C.bHair],
+    [1,1,C.bHair],[2,1,C.bHairDk],[3,1,C.bHair],[4,1,C.bHair],[5,1,C.bHairDk],[6,1,C.bHair],
+    [2,2,C.bSkin],[3,2,C.bSkin],[4,2,C.bSkin],[5,2,C.bSkin],
+    [1,2,C.bSkinSh],[6,2,C.bSkinSh],
+    [2,3,C.bSkin],[3,3,C.bSkin],[4,3,C.bSkin],[5,3,C.bSkin],
+    [3,4,C.bShirt],[4,4,C.bShirt],[3,5,C.bTie],[4,5,C.bShirt],
+    [1,4,C.bSuit],[2,4,C.bSuitLt],[5,4,C.bSuitLt],[6,4,C.bSuit],
+    [1,5,C.bSuit],[2,5,C.bSuitLt],[5,5,C.bSuitLt],[6,5,C.bSuit],
+    [1,6,C.bSuitDk],[2,6,C.bSuit],[3,6,C.bSuit],[4,6,C.bSuit],[5,6,C.bSuit],[6,6,C.bSuitDk],
+    [2,7,C.bPant],[3,7,C.bPant],[4,7,C.bPant],[5,7,C.bPant],
+    [2,8,C.bPant],[3,8,C.bPant],[4,8,C.bPant],[5,8,C.bPant],
+  ]);
+
+  if (f % 16 < 14) { px(ctx, ox+3, oy+2, s, C.bEye); px(ctx, ox+5, oy+2, s, C.bEye); }
+  if (f % 6 < 3) px(ctx, ox+4, oy+3, s, C.bMouth);
+
+  // Arm swing
+  px(ctx, ox+0, oy+(step ? 4 : 5), s, C.bSkin);
+  px(ctx, ox+7, oy+(step ? 5 : 4), s, C.bSkin);
+
+  // Alternating legs + shoes
+  px(ctx, ox+2, oy+9, s, C.bPant);
+  px(ctx, ox+5, oy+9, s, C.bPant);
+  if (step) {
+    px(ctx, ox+1, oy+10, s, C.bShoe); px(ctx, ox+2, oy+10, s, C.bShoe);
+    px(ctx, ox+5, oy+9, s, C.bShoe); px(ctx, ox+6, oy+9, s, C.bShoe);
+  } else {
+    px(ctx, ox+1, oy+9, s, C.bShoe); px(ctx, ox+2, oy+9, s, C.bShoe);
+    px(ctx, ox+5, oy+10, s, C.bShoe); px(ctx, ox+6, oy+10, s, C.bShoe);
+  }
+}
+
 // ─── Worker Sprite (sitting, 8w x 10h) ─────────────────────────────────────
 
-function drawWorkerSitting(ctx: CanvasRenderingContext2D, ox: number, oy: number, s: number, f: number, typing: boolean) {
+function drawWorkerSitting(
+  ctx: CanvasRenderingContext2D,
+  ox: number,
+  oy: number,
+  s: number,
+  f: number,
+  typing: boolean,
+  facingBoss: boolean,
+  testFailed: boolean,
+  testPassed: boolean,
+) {
   // Headphone band
   sprite(ctx, ox, oy, s, [[1,-1,C.wPhoneBand],[2,-1,C.wPhoneBand],[3,-1,C.wPhoneBand],[4,-1,C.wPhoneBand],[5,-1,C.wPhoneBand],[6,-1,C.wPhoneBand]]);
   // Headphone cups
@@ -185,16 +241,26 @@ function drawWorkerSitting(ctx: CanvasRenderingContext2D, ox: number, oy: number
     [2,1,C.wSkin],[3,1,C.wSkin],[4,1,C.wSkin],[5,1,C.wSkin],
     [2,2,C.wSkin],[3,2,C.wSkin],[4,2,C.wSkin],[5,2,C.wSkin],
   ]);
-  // Eyes (occasional blink)
-  if (f % 20 < 18) { px(ctx, ox+3, oy+1, s, C.wEye); px(ctx, ox+5, oy+1, s, C.wEye); }
+  // Eyes (occasional blink). Look left when boss is at desk.
+  if (f % 20 < 18) {
+    if (facingBoss) {
+      px(ctx, ox+2, oy+1, s, C.wEye); px(ctx, ox+4, oy+1, s, C.wEye);
+    } else {
+      px(ctx, ox+3, oy+1, s, C.wEye); px(ctx, ox+5, oy+1, s, C.wEye);
+    }
+  }
   // Hoodie
   sprite(ctx, ox, oy, s, [
     [1,3,C.wHoodie],[2,3,C.wHoodieLt],[3,3,C.wHoodieStr],[4,3,C.wHoodieStr],[5,3,C.wHoodieLt],[6,3,C.wHoodie],
     [1,4,C.wHoodieDk],[2,4,C.wHoodie],[3,4,C.wHoodieLt],[4,4,C.wHoodieLt],[5,4,C.wHoodie],[6,4,C.wHoodieDk],
     [1,5,C.wHoodieDk],[2,5,C.wHoodie],[3,5,C.wHoodie],[4,5,C.wHoodie],[5,5,C.wHoodie],[6,5,C.wHoodieDk],
   ]);
-  // Arms typing
-  if (typing) {
+  // Arms typing / celebration
+  if (testPassed) {
+    const up = f % 6 < 3;
+    px(ctx, ox+0, oy+(up ? 2 : 3), s, C.wSkin);
+    px(ctx, ox+7, oy+(up ? 2 : 3), s, C.wSkin);
+  } else if (typing) {
     const a = f % 3;
     px(ctx, ox+0, oy+4+(a===0?0:1), s, C.wSkin);
     px(ctx, ox+7, oy+4+(a===1?0:1), s, C.wSkin);
@@ -206,6 +272,11 @@ function drawWorkerSitting(ctx: CanvasRenderingContext2D, ox: number, oy: number
     [2,6,C.wPant],[3,6,C.wPant],[4,6,C.wPant],[5,6,C.wPant],
   ]);
   px(ctx, ox+2, oy+7, s, C.wShoe); px(ctx, ox+5, oy+7, s, C.wShoe);
+
+  // Stress reaction
+  if (testFailed) {
+    px(ctx, ox+7, oy+1, s, "#7afcff");
+  }
 }
 
 // ─── Office Objects ─────────────────────────────────────────────────────────
@@ -550,6 +621,8 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
   const bossFacing = useRef<"left" | "right" | "front">("front");
   const bossTargetRef = useRef(POSITIONS.bossDesk);
   const prevBossActivity = useRef(activity.boss);
+  const confettiRef = useRef<ConfettiParticle[]>([]);
+  const wasCelebratingRef = useRef(false);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -605,6 +678,21 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
     const workerTyping = activity.worker === "coding" || activity.worker === "fixing";
     const bossActive = activity.boss !== "idle";
     const testerStatus = activity.tester;
+    const isCompleteEvent = activity.tester === "passed" || activity.worker === "done";
+    const celebrating = activity.boss === "approved" || isCompleteEvent;
+
+    if (celebrating && !wasCelebratingRef.current) {
+      const confettiColors = ["#a855f7", "#3b82f6", "#22c55e", "#eab308", "#ef4444", "#f97316"];
+      confettiRef.current = Array.from({ length: 60 }, () => ({
+        x: Math.random() * 160,
+        y: -Math.random() * 20,
+        speed: 0.35 + Math.random() * 0.7,
+        drift: (Math.random() - 0.5) * 0.4,
+        phase: Math.random() * Math.PI * 2,
+        color: confettiColors[Math.floor(Math.random() * confettiColors.length)],
+      }));
+    }
+    wasCelebratingRef.current = celebrating;
 
     // ── Update boss target position ──
     if (activity.boss !== prevBossActivity.current) {
@@ -719,7 +807,11 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
     if (bossIsWalking || bossAtWhiteboard || bossAtWorkerDesk) {
       // Standing/walking sprite — add walk bob
       const walkBob = bossIsWalking ? Math.sin(frameRef.current * 0.3) * 0.5 : 0;
-      drawBossStanding(ctx, Math.round(bp.x), Math.round(bp.y + walkBob), s, f);
+      if (bossIsWalking) {
+        drawBossWalking(ctx, Math.round(bp.x), Math.round(bp.y + walkBob), s, f);
+      } else {
+        drawBossStanding(ctx, Math.round(bp.x), Math.round(bp.y + walkBob), s, f);
+      }
       // Walking dust particles
       if (bossIsWalking && frameRef.current % 8 < 3) {
         ctx.fillStyle = "rgba(200,180,255,0.2)";
@@ -783,7 +875,17 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
     drawChair(ctx, 78, 45, s);
 
     // Worker character
-    drawWorkerSitting(ctx, 79, 40, s, f, workerTyping);
+    drawWorkerSitting(
+      ctx,
+      79,
+      40,
+      s,
+      f,
+      workerTyping,
+      bossAtWorkerDesk,
+      testerStatus === "failed",
+      testerStatus === "passed",
+    );
 
     // === FAR RIGHT AREA (x ~100-155) ===
 
@@ -832,6 +934,20 @@ export default function PixelOffice({ activity, round, isDark, thought, statusTe
     if (workerTyping) {
       ctx.fillStyle = "rgba(96,160,255,0.06)";
       ctx.fillRect(77*s, 39*s, 12*s, 8*s);
+    }
+
+    // ── Celebration confetti ──
+    if (confettiRef.current.length > 0) {
+      for (const p of confettiRef.current) {
+        p.y += p.speed;
+        p.phase += 0.12;
+        p.x += p.drift + Math.sin(p.phase) * 0.08;
+        if (p.y > 72) {
+          p.y = -2 - Math.random() * 10;
+          p.x = Math.random() * 160;
+        }
+        px(ctx, p.x, p.y, s, p.color);
+      }
     }
 
     // ── Labels ──

@@ -1951,6 +1951,22 @@ export default function ChatPage() {
                 disabled={loading}
               />
               <button
+                onClick={() => {
+                  if (!input.trim()) return;
+                  setShowMultiAgent(true);
+                  // Pass the input as initial task via sessionStorage
+                  sessionStorage.setItem("multiAgentTask", input.trim());
+                  setInput("");
+                }}
+                disabled={!input.trim() || loading}
+                className="px-3 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Build with Multi-Agent TDD (Opus + Codex)"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" /><circle cx="12" cy="16" r="3" />
+                </svg>
+              </button>
+              <button
                 onClick={sendMessage}
                 disabled={!input.trim() || loading}
                 className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
