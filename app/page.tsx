@@ -266,14 +266,7 @@ export default function Home() {
           telegram: telegramToken ? "online" : "offline",
         }));
         
-        // Check Ollama
-        const ollamaUrl = data.config?.models?.providers?.ollama?.baseUrl || "http://localhost:11434";
-        try {
-          await fetch(ollamaUrl.replace("/v1", "") + "/api/tags", { mode: "no-cors" });
-          setSystemStatus(prev => ({ ...prev, ollama: "online" }));
-        } catch {
-          setSystemStatus(prev => ({ ...prev, ollama: "offline" }));
-        }
+        // Ollama status is updated by loadStats() from /api/status
       }
     } catch {
       setSystemStatus({ ollama: "offline", telegram: "offline" });
@@ -298,6 +291,11 @@ export default function Home() {
             ollama: data.services.ollama || prev.ollama,
           }));
         }
+        // Update gateway connected status
+        setGatewayStatus((prev) => ({
+          ...prev,
+          connected: data.gateway?.connected ?? prev.connected,
+        }));
       }
     } catch {}
   }
@@ -512,38 +510,7 @@ export default function Home() {
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Activity Feed */}
-        <div className="lg:col-span-2 glass rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Activity className="w-5 h-5 text-primary" />
-              Recent Activity
-            </h2>
-            <button className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              View all
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <ActivityItem
-              icon={MessageSquare}
-              title="Voice command processed"
-              description='"Order me a coffee" → Starbucks opened'
-              time="2 minutes ago"
-            />
-            <ActivityItem
-              icon={Shield}
-              title="Security check"
-              description="Night patrol completed - all clear"
-              time="3 hours ago"
-            />
-            <ActivityItem
-              icon={Zap}
-              title="Shortcut triggered"
-              description="Morning routine executed"
-              time="7 hours ago"
-            />
-          </div>
-        </div>
+        <RecentActivityFeed />
 
         {/* Status Panel */}
         <div className="glass rounded-2xl p-6">
@@ -572,6 +539,85 @@ export default function Home() {
 }
 
 // Components
+
+function timeAgo(timestamp: string | number): string {
+  const now = Date.now();
+  const then = typeof timestamp === "string" ? new Date(timestamp).getTime() : timestamp;
+  const diffMs = now - then;
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function RecentActivityFeed() {
+  const [activities, setActivities] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchActivity() {
+      try {
+        const res = await fetch("/api/activity?limit=5");
+        if (res.ok) {
+          const data = await res.json();
+          setActivities(data.activities || data || []);
+        }
+      } catch {}
+      setLoading(false);
+    }
+    fetchActivity();
+  }, []);
+
+  const getIcon = (type?: string) => {
+    switch (type) {
+      case "message": return MessageSquare;
+      case "security": return Shield;
+      case "shortcut": case "automation": return Zap;
+      case "cron": return Activity;
+      default: return MessageCircle;
+    }
+  };
+
+  return (
+    <div className="lg:col-span-2 glass rounded-2xl p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Activity className="w-5 h-5 text-primary" />
+          Recent Activity
+        </h2>
+        <Link href="/logs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          View all
+        </Link>
+      </div>
+
+      <div className="space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : activities.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground text-sm">
+            No recent activity
+          </div>
+        ) : (
+          activities.map((item: any, i: number) => (
+            <ActivityItem
+              key={item.id || i}
+              icon={getIcon(item.type)}
+              title={item.title || item.label || item.type || "Activity"}
+              description={item.description || item.summary || item.message || ""}
+              time={item.timestamp ? timeAgo(item.timestamp) : ""}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 function WelcomeScreen() {
   return (

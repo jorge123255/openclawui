@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import { promisify } from "util";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 
 const execAsync = promisify(exec);
+
+function curlCheck(url: string, timeoutSec = 3): boolean {
+  try {
+    execSync(`curl -s --max-time ${timeoutSec} -o /dev/null -w "%{http_code}" "${url}"`, { encoding: "utf-8" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function getConfigPath(): string {
   const clawdbotPath = join(homedir(), ".clawdbot", "clawdbot.json");
@@ -42,10 +51,7 @@ export async function GET() {
 
   // Check gateway
   try {
-    const res = await fetch(`http://127.0.0.1:${gatewayPort}/`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    status.gateway.connected = res.ok;
+    status.gateway.connected = curlCheck(`http://127.0.0.1:${gatewayPort}/`);
   } catch {}
 
   // Get sessions count
@@ -96,10 +102,7 @@ export async function GET() {
   // Check Ollama
   try {
     const ollamaHost = config.env?.OLLAMA_HOST || "http://192.168.1.10:11434";
-    const res = await fetch(`${ollamaHost}/api/tags`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    status.services.ollama = res.ok ? "online" : "offline";
+    status.services.ollama = curlCheck(`${ollamaHost}/api/tags`) ? "online" : "offline";
   } catch {
     status.services.ollama = "offline";
   }
@@ -107,10 +110,7 @@ export async function GET() {
   // Check N8N
   try {
     const n8nUrl = config.env?.N8N_BASE_URL || "http://192.168.1.13:5678";
-    const res = await fetch(`${n8nUrl}/healthz`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    status.services.n8n = res.ok ? "online" : "offline";
+    status.services.n8n = curlCheck(`${n8nUrl}/healthz`) ? "online" : "offline";
   } catch {
     status.services.n8n = "offline";
   }
