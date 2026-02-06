@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readdirSync, readFileSync } from "fs";
+import { readdirSync, readFileSync, writeFileSync } from "fs";
 import { join, extname } from "path";
 
 function getFiles(dir: string, base: string = ""): Array<{ path: string; name: string; isDir: boolean }> {
@@ -46,6 +46,26 @@ export async function POST(request: Request) {
   try {
     const content = readFileSync(path, "utf-8");
     return NextResponse.json({ content });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const { path, content } = await request.json();
+    if (!path || content === undefined) {
+      return NextResponse.json({ error: "path and content required" }, { status: 400 });
+    }
+
+    // Security: only allow paths under common project dirs
+    const allowed = ["/Users", "/Volumes", "/home", "/tmp"];
+    if (!allowed.some(p => path.startsWith(p))) {
+      return NextResponse.json({ error: "Path not allowed" }, { status: 403 });
+    }
+
+    writeFileSync(path, content, "utf-8");
+    return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

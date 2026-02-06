@@ -29,6 +29,9 @@ import {
   CreditCard,
   LayoutDashboard,
   FolderOpen,
+  Globe,
+  Save,
+  Hammer,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -368,6 +371,20 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
   const [projectFiles, setProjectFiles] = useState<Array<{ path: string; name: string; isDir: boolean }>>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
 
+  // URL Mode
+  const [urlMode, setUrlMode] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [urlInput, setUrlInput] = useState("");
+
+  // Save to Project
+  const [projectDir, setProjectDir] = useState("");
+  const [currentFile, setCurrentFile] = useState("");
+
+  // Build & Reload
+  const [buildCommand, setBuildCommand] = useState("");
+  const [showBuildConfig, setShowBuildConfig] = useState(false);
+  const [building, setBuilding] = useState(false);
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -605,9 +622,72 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
         } else {
           pushHtml(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>* { margin:0; padding:0; box-sizing:border-box; } body { font-family: system-ui; padding: 20px; background: #0f172a; color: #e2e8f0; }</style></head><body>${data.content}</body></html>`);
         }
+        setCurrentFile(fullPath);
+        setProjectDir(projectPath);
         setShowProjectBrowser(false);
       }
     } catch {}
+  }
+
+  /* ---- Save to project ---- */
+  async function saveToProject() {
+    if (!currentFile || !html) return;
+    try {
+      const res = await fetch("/api/design/files", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: currentFile, content: html }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setChatMessages(prev => [...prev, { role: "assistant", text: `✅ Saved to ${currentFile}` }]);
+      } else {
+        setChatMessages(prev => [...prev, { role: "assistant", text: `❌ Save failed: ${data.error}` }]);
+      }
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, { role: "assistant", text: `❌ Save error: ${e.message}` }]);
+    }
+  }
+
+  /* ---- Build & Reload ---- */
+  async function runBuild() {
+    // First save if we have a file
+    if (currentFile) {
+      await saveToProject();
+    }
+
+    if (!buildCommand.trim()) {
+      setShowBuildConfig(true);
+      return;
+    }
+
+    setBuilding(true);
+    setChatMessages(prev => [...prev, { role: "assistant", text: `🔨 Running: ${buildCommand}` }]);
+
+    try {
+      const res = await fetch("/api/design/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: buildCommand }),
+      });
+      const data = await res.json();
+
+      if (data.exitCode === 0) {
+        setChatMessages(prev => [...prev, { role: "assistant", text: `✅ Build complete! (${data.elapsed}ms)\n${data.output?.slice(0, 200) || ''}` }]);
+        // Auto-refresh preview
+        if (urlMode && previewUrl) {
+          setTimeout(() => setPreviewUrl(previewUrl + (previewUrl.includes('?') ? '&' : '?') + '_t=' + Date.now()), 1000);
+        } else {
+          setIframeKey(k => k + 1);
+        }
+      } else {
+        setChatMessages(prev => [...prev, { role: "assistant", text: `❌ Build failed (exit ${data.exitCode}):\n${data.output?.slice(0, 500) || ''}` }]);
+      }
+    } catch (e: any) {
+      setChatMessages(prev => [...prev, { role: "assistant", text: `❌ Build error: ${e.message}` }]);
+    } finally {
+      setBuilding(false);
+    }
   }
 
   /* ================================================================ */
@@ -876,6 +956,30 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
             active={!!referenceImage}
           />
 
+          {/* Save */}
+          {currentFile && (
+            <button
+              onClick={saveToProject}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-green-400 hover:bg-green-500/10"
+              title={`Save to ${currentFile}`}
+            >
+              <Save className="w-4 h-4" />
+              <span className="hidden lg:inline">Save</span>
+            </button>
+          )}
+          {/* Build */}
+          <button
+            onClick={building ? undefined : runBuild}
+            onContextMenu={(e) => { e.preventDefault(); setShowBuildConfig(true); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+              building ? "text-yellow-400 bg-yellow-500/10" : "text-orange-400 hover:bg-orange-500/10"
+            }`}
+            title="Build & Reload (right-click to configure)"
+          >
+            {building ? <Loader2 className="w-4 h-4 animate-spin" /> : <Hammer className="w-4 h-4" />}
+            <span className="hidden lg:inline">{building ? "Building..." : "Build"}</span>
+          </button>
+
           {/* Divider */}
           <div className="w-px h-5 bg-white/10 mx-1" />
 
@@ -899,6 +1003,18 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
             title="Mobile (375px)"
           />
 
+          {/* URL Mode toggle */}
+          <button
+            onClick={() => setUrlMode(!urlMode)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+              urlMode ? "bg-blue-600/20 text-blue-400" : "text-gray-400 hover:text-white hover:bg-white/10"
+            }`}
+            title="Load URL"
+          >
+            <Globe className="w-4 h-4" />
+            <span className="hidden lg:inline">URL</span>
+          </button>
+
           {/* Divider */}
           <div className="w-px h-5 bg-white/10 mx-1" />
 
@@ -911,6 +1027,78 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
           </button>
         </div>
       </div>
+
+      {/* URL Bar - shown below toolbar when in URL mode */}
+      {urlMode && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-black/30 border-b border-white/10 shrink-0">
+          <Globe className="w-4 h-4 text-blue-400 shrink-0" />
+          <input
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && urlInput.trim()) {
+                let url = urlInput.trim();
+                if (!url.startsWith("http")) url = "http://" + url;
+                setPreviewUrl(url);
+              }
+            }}
+            placeholder="http://192.168.1.151:3000"
+            className="flex-1 bg-gray-800 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
+          <button
+            onClick={() => {
+              let url = urlInput.trim();
+              if (!url.startsWith("http")) url = "http://" + url;
+              setPreviewUrl(url);
+            }}
+            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          >
+            Load
+          </button>
+          <button
+            onClick={() => previewUrl && setPreviewUrl(previewUrl + "?" + Date.now())}
+            className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded-lg text-sm hover:bg-gray-600"
+            title="Refresh"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => { setUrlMode(false); setPreviewUrl(""); }}
+            className="text-gray-500 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Build config modal */}
+      {showBuildConfig && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+          <div className="bg-gray-800 border border-white/10 rounded-2xl p-6 w-[450px]">
+            <h3 className="text-lg font-semibold mb-2">Build Configuration</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Command to run after saving. Examples:<br/>
+              <code className="text-xs bg-black/30 px-1 rounded">docker restart my-container</code><br/>
+              <code className="text-xs bg-black/30 px-1 rounded">cd /path && npm run build</code><br/>
+              <code className="text-xs bg-black/30 px-1 rounded">ssh user@server &apos;docker restart web&apos;</code>
+            </p>
+            <input
+              value={buildCommand}
+              onChange={(e) => setBuildCommand(e.target.value)}
+              placeholder="docker restart my-container"
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white mb-4 font-mono"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowBuildConfig(false)} className="px-4 py-2 bg-gray-700 rounded-lg text-sm hover:bg-gray-600">
+                Cancel
+              </button>
+              <button onClick={() => { setShowBuildConfig(false); }} className="px-4 py-2 bg-blue-600 rounded-lg text-sm hover:bg-blue-700">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============ MAIN SPLIT PANE ============ */}
       <div ref={containerRef} className="flex-1 flex overflow-hidden relative">
@@ -1198,20 +1386,24 @@ export default function DesignMode({ onClose, initialHtml }: DesignModeProps) {
           )}
 
           {/* Iframe */}
-          {html ? (
+          {(html || (urlMode && previewUrl)) ? (
             <iframe
-              key={iframeKey}
               ref={iframeRef}
-              srcDoc={injectInspector(html)}
+              key={urlMode ? previewUrl : iframeKey}
+              title="Design Preview"
+              {...(urlMode && previewUrl
+                ? { src: previewUrl }
+                : { srcDoc: injectInspector(html) }
+              )}
               className="bg-white/0 border border-white/10 rounded-lg shadow-2xl transition-all duration-300 ease-in-out"
               style={{
                 width: VIEWPORT_WIDTHS[viewport],
                 maxWidth: "100%",
                 height: "100%",
                 minHeight: "400px",
+                margin: viewport !== "desktop" ? "0 auto" : undefined,
               }}
-              sandbox="allow-scripts"
-              title="Design Preview"
+              sandbox={urlMode ? "allow-scripts allow-same-origin allow-forms" : "allow-scripts allow-same-origin"}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-600 text-sm">
