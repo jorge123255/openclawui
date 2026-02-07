@@ -35,6 +35,10 @@ export default function AppStudio({ isDark, onClose }: Props) {
   const [platform, setPlatform] = useState<"ios" | "tvos">("ios");
   const [newProjectName, setNewProjectName] = useState("");
   const [showNewProject, setShowNewProject] = useState(false);
+  const [showBrowse, setShowBrowse] = useState(false);
+  const [browsePath, setBrowsePath] = useState("/Users/gszulc");
+  const [browseEntries, setBrowseEntries] = useState<string[]>([]);
+  const [externalProjectPath, setExternalProjectPath] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<{ role: string; text: string }[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -126,12 +130,56 @@ export default function AppStudio({ isDark, onClose }: Props) {
 
   async function openProject(name: string) {
     setActiveProject(name);
+    setExternalProjectPath(null);
     await loadFiles(name);
     addChat("system", `Opened project: ${name}`);
   }
 
+  async function browseDir(path: string) {
+    setBrowsePath(path);
+    try {
+      const res = await fetch("/api/project/browse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      setBrowseEntries(data.entries || []);
+    } catch {
+      setBrowseEntries([]);
+    }
+  }
+
+  async function openExternalProject(path: string) {
+    setShowBrowse(false);
+    setExternalProjectPath(path);
+    setActiveProject(path.split("/").pop() || path);
+    addChat("system", `Opened external project: ${path}`);
+    // Load Swift files from external path
+    try {
+      const res = await fetch("/api/app-studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "openExternal", path }),
+      });
+      const data = await res.json();
+      setFiles(data.files || []);
+      if (data.files?.length > 0) {
+        const content = data.files.find((f: SwiftFile) => f.path.includes("ContentView"));
+        const first = content || data.files[0];
+        setActiveFile(first.path);
+        setCode(first.content);
+        addChat("system", `Found ${data.files.length} Swift files`);
+      } else {
+        addChat("system", "No .swift files found in this project");
+      }
+    } catch {
+      addChat("system", "Failed to scan project");
+    }
+  }
+
   async function buildAndRun() {
-    if (!activeProject || !selectedSim) return;
+    if ((!activeProject && !externalProjectPath) || !selectedSim) return;
     setBuilding(true);
     setBuildOutput(null);
     addChat("system", "🔨 Building...");
@@ -143,10 +191,16 @@ export default function AppStudio({ isDark, onClose }: Props) {
         body: JSON.stringify({ action: "boot", udid: selectedSim }),
       });
 
+      const buildPayload: Record<string, string> = { action: "build", simulator: selectedSim };
+      if (externalProjectPath) {
+        buildPayload.externalPath = externalProjectPath;
+      } else if (activeProject) {
+        buildPayload.project = activeProject;
+      }
       const res = await fetch("/api/app-studio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "build", project: activeProject, simulator: selectedSim }),
+        body: JSON.stringify(buildPayload),
       });
       const data = await res.json();
       setBuildOutput(data.output);
@@ -180,15 +234,19 @@ export default function AppStudio({ isDark, onClose }: Props) {
     setAiLoading(true);
     addChat("user", instruction);
     try {
+      // Build project context - all file names + current file content
+      const projectContext = files.map(f => f.path).join(", ");
       const res = await fetch("/api/app-studio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "aiEdit",
           project: activeProject,
+          externalPath: externalProjectPath,
           file: activeFile,
           instruction: instruction.trim(),
           currentCode: code,
+          projectFiles: projectContext,
         }),
       });
       const data = await res.json();
@@ -211,12 +269,21 @@ export default function AppStudio({ isDark, onClose }: Props) {
   }
 
   function saveFile() {
-    if (!activeProject || !activeFile) return;
-    fetch("/api/app-studio", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "editFile", project: activeProject, file: activeFile, content: code }),
-    });
+    if (!activeFile) return;
+    if (externalProjectPath) {
+      // Save to external project path
+      fetch("/api/app-studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "editFile", externalPath: externalProjectPath, file: activeFile, content: code }),
+      });
+    } else if (activeProject) {
+      fetch("/api/app-studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "editFile", project: activeProject, file: activeFile, content: code }),
+      });
+    }
     addChat("system", `💾 Saved ${activeFile}`);
   }
 
@@ -321,13 +388,83 @@ export default function AppStudio({ isDark, onClose }: Props) {
                 </button>
               ))}
               
-              {!showNewProject ? (
-                <button
-                  onClick={() => setShowNewProject(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 mt-4"
-                >
-                  + New Project
-                </button>
+              {!showNewProject && !showBrowse ? (
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={() => setShowNewProject(true)}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    + New Project
+                  </button>
+                  <button
+                    onClick={() => { setShowBrowse(true); browseDir(browsePath); }}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                  >
+                    📂 Open Existing
+                  </button>
+                </div>
+              ) : showBrowse ? (
+                <div className={`mt-4 p-3 rounded-lg border ${border} ${cardBg} max-h-64 overflow-hidden flex flex-col`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <button
+                      onClick={() => {
+                        const parent = browsePath.split("/").slice(0, -1).join("/") || "/";
+                        browseDir(parent);
+                      }}
+                      className={`px-2 py-1 text-xs rounded border ${border} hover:bg-blue-500/20`}
+                    >
+                      ⬆ Up
+                    </button>
+                    <span className={`text-xs ${textMuted} truncate flex-1`}>{browsePath}</span>
+                    <button
+                      onClick={() => setShowBrowse(false)}
+                      className={`px-2 py-1 text-xs rounded border ${border}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="overflow-y-auto flex-1 space-y-1">
+                    {browseEntries.map((entry) => {
+                      const isDir = entry.endsWith("/");
+                      const name = entry.replace(/\/$/, "");
+                      const isXcodeProj = name.endsWith(".xcodeproj") || name.endsWith(".xcworkspace");
+                      const fullPath = `${browsePath}/${name}`;
+                      return (
+                        <div key={entry} className="flex items-center gap-2">
+                          <button
+                            onClick={() => isDir ? browseDir(fullPath) : null}
+                            className={`flex-1 text-left px-2 py-1 text-sm rounded truncate ${
+                              isXcodeProj
+                                ? "text-blue-400 font-medium"
+                                : isDir
+                                ? "hover:bg-white/5"
+                                : `${textMuted} cursor-default`
+                            }`}
+                          >
+                            {isDir ? "📁" : isXcodeProj ? "🔨" : "📄"} {name}
+                          </button>
+                          {isDir && (
+                            <button
+                              onClick={() => openExternalProject(fullPath)}
+                              className="px-2 py-0.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 shrink-0"
+                            >
+                              Open
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {browseEntries.length === 0 && (
+                      <p className={`text-sm ${textMuted} text-center py-4`}>Empty directory</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => openExternalProject(browsePath)}
+                    className="mt-2 w-full px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
+                  >
+                    📂 Open This Folder as Project
+                  </button>
+                </div>
               ) : (
                 <div className={`mt-4 p-4 rounded-lg border ${border} ${cardBg}`}>
                   <input

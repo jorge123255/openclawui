@@ -65,10 +65,43 @@ function screenshotSimulator(udid: string): string | null {
 function buildProject(projectPath: string, simulator: string): { success: boolean; output: string; duration: number } {
   const start = Date.now();
   try {
-    const output = execSync(
-      `cd "${projectPath}" && xcodebuild -scheme App -destination 'platform=iOS Simulator,id=${simulator}' build 2>&1`,
-      { timeout: 120000, maxBuffer: 5 * 1024 * 1024 }
-    ).toString();
+    // Auto-detect project type and scheme
+    let buildCmd = "";
+    const entries = readdirSync(projectPath);
+    const xcworkspace = entries.find(e => e.endsWith(".xcworkspace"));
+    const xcodeproj = entries.find(e => e.endsWith(".xcodeproj"));
+    
+    if (xcworkspace) {
+      // Workspace - list schemes and use first one
+      try {
+        const schemesOut = execSync(
+          `cd "${projectPath}" && xcodebuild -workspace "${xcworkspace}" -list 2>&1`,
+          { timeout: 15000 }
+        ).toString();
+        const schemeMatch = schemesOut.match(/Schemes:\s*\n\s+(.+)/);
+        const scheme = schemeMatch ? schemeMatch[1].trim() : "App";
+        buildCmd = `cd "${projectPath}" && xcodebuild -workspace "${xcworkspace}" -scheme "${scheme}" -destination 'platform=iOS Simulator,id=${simulator}' build 2>&1`;
+      } catch {
+        buildCmd = `cd "${projectPath}" && xcodebuild -workspace "${xcworkspace}" -scheme App -destination 'platform=iOS Simulator,id=${simulator}' build 2>&1`;
+      }
+    } else if (xcodeproj) {
+      try {
+        const schemesOut = execSync(
+          `cd "${projectPath}" && xcodebuild -project "${xcodeproj}" -list 2>&1`,
+          { timeout: 15000 }
+        ).toString();
+        const schemeMatch = schemesOut.match(/Schemes:\s*\n\s+(.+)/);
+        const scheme = schemeMatch ? schemeMatch[1].trim() : "App";
+        buildCmd = `cd "${projectPath}" && xcodebuild -project "${xcodeproj}" -scheme "${scheme}" -destination 'platform=iOS Simulator,id=${simulator}' build 2>&1`;
+      } catch {
+        buildCmd = `cd "${projectPath}" && xcodebuild -project "${xcodeproj}" -scheme App -destination 'platform=iOS Simulator,id=${simulator}' build 2>&1`;
+      }
+    } else {
+      // Swift package or raw project
+      buildCmd = `cd "${projectPath}" && swift build 2>&1`;
+    }
+
+    const output = execSync(buildCmd, { timeout: 120000, maxBuffer: 5 * 1024 * 1024 }).toString();
     return { success: true, output: output.slice(-2000), duration: Date.now() - start };
   } catch (e: any) {
     return { success: false, output: (e.stdout?.toString() || e.message || "").slice(-2000), duration: Date.now() - start };
@@ -301,24 +334,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, path: projectPath, platform });
     }
 
+    case "openExternal": {
+      const { path: extPath } = body;
+      if (!extPath) return NextResponse.json({ error: "No path" }, { status: 400 });
+      // Security check
+      if (!extPath.startsWith("/Users") && !extPath.startsWith("/Volumes") && !extPath.startsWith("/tmp")) {
+        return NextResponse.json({ error: "Path not allowed" }, { status: 403 });
+      }
+      if (!existsSync(extPath)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      const files = scanSwiftFiles(extPath);
+      return NextResponse.json({ files });
+    }
+
     case "editFile": {
-      const { project, file, content } = body;
-      if (!project || !file || content === undefined) {
+      const { project, externalPath, file, content } = body;
+      if (!file || content === undefined) {
         return NextResponse.json({ error: "Missing params" }, { status: 400 });
       }
-      const filePath = join(PROJECTS_DIR, project, file);
-      // Security: ensure within projects dir
-      if (!filePath.startsWith(PROJECTS_DIR)) {
-        return NextResponse.json({ error: "Invalid path" }, { status: 403 });
+      let filePath: string;
+      if (externalPath) {
+        filePath = join(externalPath, file);
+        if (!filePath.startsWith("/Users") && !filePath.startsWith("/Volumes") && !filePath.startsWith("/tmp")) {
+          return NextResponse.json({ error: "Invalid path" }, { status: 403 });
+        }
+      } else if (project) {
+        filePath = join(PROJECTS_DIR, project, file);
+        if (!filePath.startsWith(PROJECTS_DIR)) {
+          return NextResponse.json({ error: "Invalid path" }, { status: 403 });
+        }
+      } else {
+        return NextResponse.json({ error: "No project" }, { status: 400 });
       }
       writeFileSync(filePath, content);
       return NextResponse.json({ ok: true });
     }
 
     case "build": {
-      const { project, simulator } = body;
-      if (!project || !simulator) return NextResponse.json({ error: "Missing params" }, { status: 400 });
-      const projectPath = join(PROJECTS_DIR, project);
+      const { project, externalPath: extBuildPath, simulator } = body;
+      if (!simulator) return NextResponse.json({ error: "Missing simulator" }, { status: 400 });
+      let projectPath: string;
+      if (extBuildPath) {
+        projectPath = extBuildPath;
+      } else if (project) {
+        projectPath = join(PROJECTS_DIR, project);
+      } else {
+        return NextResponse.json({ error: "No project" }, { status: 400 });
+      }
       const result = buildProject(projectPath, simulator);
       return NextResponse.json(result);
     }
@@ -332,24 +393,27 @@ export async function POST(req: NextRequest) {
 
     case "aiEdit": {
       // Send the current code + user instruction to the AI for modification
-      const { project, file, instruction, currentCode } = body;
+      const { project, externalPath, file, instruction, currentCode, projectFiles } = body;
       if (!instruction || !currentCode) return NextResponse.json({ error: "Missing params" }, { status: 400 });
 
       const GATEWAY_URL = "http://192.168.1.75:18789";
       const GATEWAY_TOKEN = "e590d5dafc405a8f7cf9b024be074aff6f11405f99b8d8c2";
+
+      const projectContext = projectFiles ? `\nProject files: ${projectFiles}\nCurrent file: ${file}` : "";
 
       const payload = JSON.stringify({
         model: "openai-codex/gpt-5.3-codex",
         messages: [
           {
             role: "system",
-            content: `You are a SwiftUI expert. The user will give you a SwiftUI file and an instruction. 
+            content: `You are a SwiftUI expert. The user will give you a SwiftUI file and an instruction.${projectContext}
 Return ONLY the complete modified Swift file. No explanations, no markdown, no code fences — just the raw Swift code.
-Make sure the code compiles. Use modern SwiftUI (iOS 17+).`,
+Make sure the code compiles. Use modern SwiftUI (iOS 17+).
+If the user asks for a new feature that spans multiple files, implement what you can in the current file and mention what other files need changes.`,
           },
           {
             role: "user",
-            content: `Here is the current SwiftUI file:\n\n${currentCode}\n\nInstruction: ${instruction}\n\nReturn the complete modified file:`,
+            content: `Here is the current SwiftUI file (${file}):\n\n${currentCode}\n\nInstruction: ${instruction}\n\nReturn the complete modified file:`,
           },
         ],
         stream: false,
@@ -379,11 +443,18 @@ Make sure the code compiles. Use modern SwiftUI (iOS 17+).`,
             newCode = newCode.replace(/^```swift\n?/, "").replace(/\n?```$/, "").trim();
             
             // Auto-save if project + file provided
-            if (project && file && newCode) {
-              const filePath = join(PROJECTS_DIR, project, file);
-              if (filePath.startsWith(PROJECTS_DIR)) {
-                writeFileSync(filePath, newCode);
+            if (file && newCode) {
+              let filePath: string | null = null;
+              if (externalPath) {
+                filePath = join(externalPath, file);
+                if (!filePath.startsWith("/Users") && !filePath.startsWith("/Volumes") && !filePath.startsWith("/tmp")) {
+                  filePath = null;
+                }
+              } else if (project) {
+                filePath = join(PROJECTS_DIR, project, file);
+                if (!filePath.startsWith(PROJECTS_DIR)) filePath = null;
               }
+              if (filePath) writeFileSync(filePath, newCode);
             }
             
             resolve(NextResponse.json({ ok: true, code: newCode }));
